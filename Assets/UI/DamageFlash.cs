@@ -10,15 +10,25 @@ public class DamageFlash : MonoBehaviour
 
     private static DamageFlash instance;
 
+    private static readonly Color DamageRed = new Color(0.85f, 0f, 0f);
+
     private Image overlay;
     private float alpha;
+    private Color tint = DamageRed;
 
     // strength 0-1: bigger hits flash harder
     public static void Play(float strength = 1f)
     {
+        Play(strength, DamageRed);
+    }
+
+    // Flash in another color, e.g. icy blue when the player is slowed
+    public static void Play(float strength, Color color)
+    {
         if (instance == null)
             instance = Create();
         instance.alpha = Mathf.Max(instance.alpha, MaxAlpha * Mathf.Clamp01(strength));
+        instance.tint = color;
     }
 
     private static DamageFlash Create()
@@ -52,7 +62,7 @@ public class DamageFlash : MonoBehaviour
         }
 
         overlay.enabled = true;
-        overlay.color = new Color(0.85f, 0f, 0f, alpha);
+        overlay.color = new Color(tint.r, tint.g, tint.b, alpha);
         alpha = Mathf.MoveTowards(alpha, 0f, MaxAlpha / FadeSeconds * Time.unscaledDeltaTime);
     }
 

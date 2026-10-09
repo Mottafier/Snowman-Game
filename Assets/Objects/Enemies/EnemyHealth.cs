@@ -85,9 +85,13 @@ public class EnemyHealth : MonoBehaviour
     }
 
 
+    // Raised just before the enemy is destroyed by running out of health
+    public event System.Action Died;
+
     void Die()
     {
         // Add death logic here (e.g., play animation, drop loot, etc.)
+        Died?.Invoke();
         Destroy(gameObject);
     }
 

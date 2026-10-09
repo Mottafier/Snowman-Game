@@ -23,6 +23,9 @@ public class SimpleFirstPerson : MonoBehaviour
     public float moveSpeed = 3.5f;
     public float jumpHeight = 1.2f;
     public float snowJumpHeight = 3f; // meters gained by an air jump that spends one snow
+
+    private float slowMultiplier = 1f;
+    private float slowedUntil;
     public float gravity = -9.81f;
     public float lookSensitivity = 0.4f;
 
@@ -80,7 +83,19 @@ public class SimpleFirstPerson : MonoBehaviour
         }
 
         speed *= Mathf.Lerp(0.3f, 1f, playerSnow.SnowAmount / 6f);
+
+        if (Time.time < slowedUntil)
+        {
+            speed *= slowMultiplier;
+        }
         return speed;
+    }
+
+    // Temporarily slows the player, e.g. when hit by an enemy with the "slows" ability
+    public void ApplySlow(float multiplier, float seconds)
+    {
+        slowMultiplier = multiplier;
+        slowedUntil = Mathf.Max(slowedUntil, Time.time + seconds);
     }
     void Update()
     {
