@@ -17,7 +17,7 @@ public class ModelHealthBar : MonoBehaviour
     private Material fillMaterial;
     private Camera cam;
 
-    public static ModelHealthBar Attach(EnemyHealth target, float modelHeight, float modelWidth)
+    public static ModelHealthBar Attach(EnemyHealth target, float modelHeight, float modelWidth, string label)
     {
         var bar = new GameObject($"{target.name} health bar").AddComponent<ModelHealthBar>();
         bar.target = target;
@@ -26,8 +26,8 @@ public class ModelHealthBar : MonoBehaviour
         bar.width = Mathf.Clamp(size, MinWidth, MaxWidth);
         bar.thickness = Mathf.Clamp(bar.width * 0.1f, 0.04f, 0.4f);
         bar.border = bar.thickness * 0.25f;
-        bar.heightAboveTarget = modelHeight + Mathf.Clamp(bar.width * 0.25f, 0.15f, 1f);
-        bar.Build();
+        bar.heightAboveTarget = modelHeight + Mathf.Clamp(bar.width * 0.08f, 0.05f, 0.3f);
+        bar.Build(label);
         return bar;
     }
 
@@ -38,7 +38,7 @@ public class ModelHealthBar : MonoBehaviour
             r.enabled = visible;
     }
 
-    private void Build()
+    private void Build(string label)
     {
         Transform back = LowPolyBuilder.Part(transform, "Background", LowPolyBuilder.Box, Color.black,
             Vector3.zero, new Vector3(width + border * 2f, thickness + border * 2f, 0.01f));
@@ -49,6 +49,51 @@ public class ModelHealthBar : MonoBehaviour
             new Vector3(0f, 0f, -0.01f), new Vector3(width, thickness, 0.01f));
         fillMaterial = UnlitMaterial(Color.green);
         fill.GetComponent<Renderer>().sharedMaterial = fillMaterial;
+
+        if (!string.IsNullOrWhiteSpace(label))
+            BuildLabel(label.Trim());
+    }
+
+    // The enemy's name, centred on the top edge of the bar: half above it, half overlapping it
+    private void BuildLabel(string label)
+    {
+        float lineHeight = Mathf.Max(thickness * 1.8f, 0.12f);
+        float maxWidth = Mathf.Max(width * 1.6f, 1f);
+        float topEdge = (thickness + border * 2f) / 2f;
+
+        var root = new GameObject("Name").transform;
+        root.SetParent(transform, false);
+        root.localPosition = new Vector3(0f, topEdge, -0.03f);
+
+        // A black copy just behind and to the side keeps the white text readable over the bar and the sky
+        TextMesh shadow = MakeText(root, label, Color.black, new Vector3(lineHeight * 0.06f, -lineHeight * 0.06f, 0.005f));
+        TextMesh text = MakeText(root, label, Color.white, Vector3.zero);
+
+        // Size it: measure the text at scale 1, then scale to the wanted height (but no wider than maxWidth)
+        Bounds size = text.GetComponent<MeshRenderer>().bounds;
+        if (size.size.y < 0.001f)
+            size.size = new Vector3(label.Length * 0.4f, 0.64f, 0f); // mesh wasn't built yet: rough estimate
+        float fit = lineHeight / size.size.y;
+        if (size.size.x * fit > maxWidth)
+            fit = maxWidth / size.size.x;
+        root.localScale = Vector3.one * fit;
+    }
+
+    private static TextMesh MakeText(Transform parent, string label, Color color, Vector3 offset)
+    {
+        var go = new GameObject("Text");
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = offset;
+        var text = go.AddComponent<TextMesh>();
+        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.GetComponent<MeshRenderer>().sharedMaterial = text.font.material;
+        text.text = label;
+        text.fontSize = 64;
+        text.characterSize = 0.1f;
+        text.anchor = TextAnchor.MiddleCenter;
+        text.alignment = TextAlignment.Center;
+        text.color = color;
+        return text;
     }
 
     void LateUpdate()

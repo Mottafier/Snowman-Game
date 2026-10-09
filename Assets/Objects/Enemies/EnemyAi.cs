@@ -26,6 +26,10 @@ public class EnemyAi : MonoBehaviour
     void Start()
     {
         player = FindFirstObjectByType<PlayerSnow>().transform;
+
+        // Bob the model (the animated child if there is one) while it walks
+        Animator animator = GetComponentInChildren<Animator>();
+        WalkBob.Add(gameObject, animator != null ? animator.transform : transform);
     }
 
     // Update is called once per frame

@@ -69,6 +69,9 @@ public class ModelEnemy : MonoBehaviour
     private float cooldown;
     private float age;
     private float healTimer = HealInterval;
+    private const float MeleeLungeMeters = 0.4f;  // how far past attackRange a melee hit still reaches
+    private const float LungeSeconds = 0.36f;     // dash out, hit, snap back
+    private const float LungeOutFraction = 0.45f; // the dash out is the quick part
     private bool busy; // mid-attack or mid-teleport, so movement pauses
     private bool enraged;
     private bool isSplitPiece; // pieces from a split don't split again
@@ -144,6 +147,7 @@ public class ModelEnemy : MonoBehaviour
         body = model;
         bodyRestPosition = model.localPosition;
         bodyRestScale = model.localScale;
+        WalkBob.Add(gameObject, model);
         baseScale = transform.localScale;
         radius = footprintRadius;
         height = modelHeight;
@@ -162,7 +166,7 @@ public class ModelEnemy : MonoBehaviour
         health = gameObject.AddComponent<EnemyHealth>();
         health.hpMax = behavior.health;
         health.Died += OnDied;
-        healthBar = ModelHealthBar.Attach(health, height, radius * 2f);
+        healthBar = ModelHealthBar.Attach(health, height, radius * 2f, name.Replace("(Clone)", ""));
         MeasureHeadAndFeet();
         rideLimit = Random.Range(2f, 5f);
     }
@@ -682,12 +686,40 @@ public class ModelEnemy : MonoBehaviour
 
     // ---------- Attacks ----------
 
-    // Flash white, swell, freeze for a moment, then attack toward wherever the player is now
+    // Roughly how tall the model is in the world, so the swipe lines up with its body
+    private float BodyHeight()
+    {
+        Bounds bounds = new Bounds(transform.position, Vector3.zero);
+        foreach (Renderer r in body.GetComponentsInChildren<MeshRenderer>())
+            bounds.Encapsulate(r.bounds);
+        return Mathf.Clamp(bounds.max.y - groundY, 0.8f, 6f);
+    }
+
+    private bool IsMelee => !IsShooter && behavior.attack != "slam" && behavior.attack != "explode";
+
+    // Flash white, swell, freeze for a moment, then attack toward wherever the player is now.
+    // Melee enemies lock their aim at the start and show the slash zone, so the player can step out of it.
     private IEnumerator TelegraphThenAttack()
     {
         busy = true;
+        MeleeSlash slash = null;
+        Vector3 aim = Flat(player.position - transform.position);
+        aim = aim.sqrMagnitude > 0.0001f ? aim.normalized : transform.forward;
+        if (IsMelee)
+        {
+            float reach = radius + behavior.attackRange + MeleeLungeMeters;
+            slash = MeleeSlash.Show(new Vector3(transform.position.x, groundY + 0.05f, transform.position.z), aim, reach,
+                AttackTelegraph.FlashSeconds + AttackTelegraph.PauseSeconds, BodyHeight());
+        }
+
         yield return AttackTelegraph.Play(body, body);
         busy = false;
+
+        if (IsMelee)
+        {
+            StartCoroutine(Lunge(aim, slash));
+            yield break;
+        }
 
         Vector3 toPlayer = Flat(player.position - transform.position);
         Attack(toPlayer.sqrMagnitude > 0.0001f ? toPlayer.normalized : transform.forward);
@@ -717,7 +749,7 @@ public class ModelEnemy : MonoBehaviour
                 StartCoroutine(Explode());
                 break;
             default:
-                StartCoroutine(Lunge(direction));
+                StartCoroutine(Lunge(direction, null));
                 break;
         }
     }
@@ -740,18 +772,51 @@ public class ModelEnemy : MonoBehaviour
         DamageFlash.Play(0.8f, SlowBlue);
     }
 
-    private IEnumerator Lunge(Vector3 direction)
+    private IEnumerator Lunge(Vector3 direction, MeleeSlash slash)
     {
         busy = true;
-        Vector3 localForward = transform.InverseTransformDirection(direction) * 0.4f / Mathf.Max(transform.localScale.x, 0.01f);
-        for (float t = 0f; t < 0.2f; t += Time.deltaTime)
+        if (slash != null)
+            slash.Strike(LungeSeconds * LungeOutFraction);
+
+        // Dash most of the way to the player, then snap back
+        float dash = Mathf.Clamp(behavior.attackRange + 0.6f, 1.2f, 3f);
+        Vector3 localForward = transform.InverseTransformDirection(direction) * dash / Mathf.Max(transform.localScale.x, 0.01f);
+        float outSeconds = LungeSeconds * LungeOutFraction;
+        bool hit = false;
+        for (float t = 0f; t < LungeSeconds; t += Time.deltaTime)
         {
-            body.localPosition = bodyRestPosition + localForward * Mathf.Sin(t / 0.2f * Mathf.PI);
+            float amount;
+            if (t < outSeconds)
+            {
+                float k = t / outSeconds;
+                amount = 1f - (1f - k) * (1f - k); // fast start, lands at full stretch
+            }
+            else
+            {
+                if (!hit)
+                {
+                    hit = true;
+                    LungeHit(direction);
+                }
+                float k = (t - outSeconds) / (LungeSeconds - outSeconds);
+                amount = 1f - k * k; // quick pull back
+            }
+            body.localPosition = bodyRestPosition + localForward * amount;
             yield return null;
         }
         body.localPosition = bodyRestPosition;
-        HitPlayer(playerHealth, behavior.damage, Slows);
+        if (!hit)
+            LungeHit(direction);
         busy = false;
+    }
+
+    // Only connects if the player is still inside the slash zone, so walking out of it dodges the hit
+    private void LungeHit(Vector3 direction)
+    {
+        Vector3 toPlayer = player.position - transform.position;
+        toPlayer.y = 0f;
+        if (toPlayer.magnitude - radius <= behavior.attackRange + MeleeLungeMeters && MeleeSlash.InArc(direction, toPlayer))
+            HitPlayer(playerHealth, behavior.damage, Slows);
     }
 
     // Three quick shots in a row

@@ -38,7 +38,9 @@ Guidelines:
 - Use between 5 and 60 parts. Flat, saturated colors with r, g, b from 0 to 1.
 - People and characters: make them recognizable through build, clothing, hair, colors and signature accessories.
 - Abstract words or actions: build the most iconic object or symbol associated with them.
-- name: a short display name for the model.
+- name: the enemy's name, shown above its health bar. Make it catchy and unique to this model, 1 to 3 words and
+  at most 18 characters. If the request is long, abbreviate it creatively ("a giant angry robot made of pizza"
+  becomes "Pizzabot Rex") instead of cutting it off. Plain letters, numbers and spaces only.
 - count: how many copies of the model to spawn, read from the phrase. A single thing ("goblin", "a banana") is 1.
   Groups scale with the wording: "a few" or "some" about 3, "a pack" or "a gang" 4 to 8, "a horde" or "a swarm"
   8 to 15, "an army" 20 to 50. Never more than 50. Plain plurals ("goblins") are 2 to 4.
