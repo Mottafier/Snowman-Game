@@ -33,6 +33,7 @@ public class PlayerHealth : MonoBehaviour
     public void TakeDamage(int dmg)
     {
         health -= dmg;
+        DamageFlash.Play(Mathf.Lerp(0.5f, 1f, dmg / 25f));
 
         if (health <= 0)
         {

@@ -58,6 +58,7 @@ public class ModelEnemy : MonoBehaviour
 
         var health = gameObject.AddComponent<EnemyHealth>();
         health.hpMax = behavior.health;
+        ModelHealthBar.Attach(health, height, radius * 2f);
     }
 
     // Keep whatever Claude picked within playable limits
