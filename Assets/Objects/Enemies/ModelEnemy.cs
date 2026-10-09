@@ -108,6 +108,13 @@ public class ModelEnemy : MonoBehaviour
     private bool advancing;
     private bool climbing;
     private float blockedTimer;
+    private float rideTimer;       // how long it's been riding on someone's head
+    private float rideLimit;       // after this long it stops holding on and may wander off
+
+    // Measured from the actual mesh (not the bounding box, which rotated parts make too big):
+    // the very top of the model, so others stand right on it, and how far the lowest point sits above the feet
+    private Vector3 headLocal;
+    private float footGap;
 
     // Natural variation, so a crowd surrounds the player instead of funnelling into one spot
     private float surroundAngle;   // where around the player (degrees) this enemy wants to stand
@@ -156,6 +163,8 @@ public class ModelEnemy : MonoBehaviour
         health.hpMax = behavior.health;
         health.Died += OnDied;
         healthBar = ModelHealthBar.Attach(health, height, radius * 2f);
+        MeasureHeadAndFeet();
+        rideLimit = Random.Range(2f, 5f);
     }
 
     // Keep whatever Claude picked within playable limits
@@ -253,6 +262,36 @@ public class ModelEnemy : MonoBehaviour
     }
 
     // ---------- Movement ----------
+
+    private void MeasureHeadAndFeet()
+    {
+        float top = float.NegativeInfinity, bottom = float.PositiveInfinity;
+        foreach (MeshFilter filter in body.GetComponentsInChildren<MeshFilter>())
+        {
+            if (filter.sharedMesh == null)
+                continue;
+            foreach (Vector3 vertex in filter.sharedMesh.vertices)
+            {
+                Vector3 local = transform.InverseTransformPoint(filter.transform.TransformPoint(vertex));
+                if (local.y > top)
+                {
+                    top = local.y;
+                    headLocal = local;
+                }
+                bottom = Mathf.Min(bottom, local.y);
+            }
+        }
+
+        if (float.IsInfinity(top))
+        {
+            headLocal = Vector3.up * (height / Mathf.Max(transform.localScale.y, 0.01f));
+            bottom = 0f;
+        }
+        footGap = Mathf.Max(0f, bottom * transform.localScale.y);
+    }
+
+    // The top of its head in the world, following it as it hops, lunges and turns
+    private Vector3 HeadPoint => transform.TransformPoint(headLocal);
 
     // Instead of everyone heading for the player's exact position, each enemy heads for its own spot on a ring
     // around them (starting from the side it's already on), drifts away from spots other enemies have taken,
@@ -356,8 +395,8 @@ public class ModelEnemy : MonoBehaviour
     }
 
     // Megabonk-style crowding. Enemies side by side push apart. One that's heading for the player with
-    // another enemy blocking the way first tries to step around it, and if it stays stuck climbs up onto its head, rides along up there, and falls off
-    // when it walks off the edge or the one underneath dies.
+    // another enemy blocking the way first tries to step around it, and if it stays stuck climbs up onto the very top
+    // of its head, rides along up there for a few seconds, and falls off when it walks off or the one underneath dies.
     private Vector3 Crowd(Vector3 position, Vector3 direction, bool advance)
     {
         moveDirection = direction;
@@ -366,6 +405,8 @@ public class ModelEnemy : MonoBehaviour
         float support = 0f;    // height of the highest head it's standing on
         float climbTo = -1f;   // height of the head it's climbing onto, if any
         bool blocked = false;  // something's in the way this frame
+        ModelEnemy supporter = null;
+        Vector3 climbHead = Vector3.zero;
 
         if (layer != CrowdLayer.None)
         {
@@ -383,10 +424,17 @@ public class ModelEnemy : MonoBehaviour
 
                 if (layer == CrowdLayer.Ground)
                 {
-                    float otherTop = other.standHeight + other.height;
-                    if (standHeight >= otherTop - 0.05f)
+                    // The standHeight that puts my lowest point exactly on the top of its head
+                    Vector3 head = other.HeadPoint;
+                    float otherTop = head.y - groundY - footGap;
+                    if (standHeight >= otherTop - 0.1f)
                     {
-                        support = Mathf.Max(support, otherTop); // standing on its head
+                        // Up at its head height: only stand on it if I'm right over its head, otherwise fall
+                        if (Flat(head - position).magnitude <= Mathf.Max(0.3f, other.radius * 0.5f) && otherTop > support)
+                        {
+                            support = otherTop;
+                            supporter = other;
+                        }
                         continue;
                     }
                     if (other.standHeight > standHeight + 0.05f)
@@ -401,7 +449,12 @@ public class ModelEnemy : MonoBehaviour
                         blocked = true;
                         if (climbing || blockedTimer >= ClimbPatience)
                         {
-                            climbTo = Mathf.Max(climbTo, otherTop);
+                            // Scramble up and over toward the top of its head
+                            if (otherTop > climbTo)
+                            {
+                                climbTo = otherTop;
+                                climbHead = head;
+                            }
                             continue;
                         }
                         // Not stuck for long yet: try to step around it first
@@ -418,6 +471,9 @@ public class ModelEnemy : MonoBehaviour
 
         if (climbTo > standHeight)
         {
+            // Move over its head at the same pace as climbing up, so it arrives right on top
+            float upward = Mathf.Clamp01(ClimbSpeed * Time.deltaTime / (climbTo - standHeight));
+            position = Vector3.Lerp(position, new Vector3(climbHead.x, position.y, climbHead.z), upward);
             standHeight = Mathf.MoveTowards(standHeight, climbTo, ClimbSpeed * Time.deltaTime);
             fallSpeed = 0f;
         }
@@ -430,6 +486,22 @@ public class ModelEnemy : MonoBehaviour
         {
             standHeight = support;
             fallSpeed = 0f;
+        }
+
+        // Riding: stay centred on its head as it moves, for a few seconds, then let go and maybe wander off
+        if (supporter != null && !climbing)
+        {
+            rideTimer += Time.deltaTime;
+            if (rideTimer < rideLimit)
+            {
+                Vector3 head = supporter.HeadPoint;
+                position = Vector3.Lerp(position, new Vector3(head.x, position.y, head.z), Mathf.Min(1f, 20f * Time.deltaTime));
+            }
+        }
+        else if (standHeight <= 0f)
+        {
+            rideTimer = 0f;
+            rideLimit = Random.Range(2f, 5f);
         }
         return position;
     }
