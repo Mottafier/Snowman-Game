@@ -31,6 +31,24 @@ public class SnowSpray : MonoBehaviour
         }
     }
 
+    // Throws `count` chunks out in every direction, each in a random one of `colors` (a shot breaking apart)
+    public static void Burst(Vector3 center, Color[] colors, int count, float speed = 3f)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            var chunk = new GameObject("Burst chunk").transform;
+            chunk.position = center + Random.insideUnitSphere * 0.1f;
+            chunk.rotation = Random.rotation;
+            Color color = colors != null && colors.Length > 0 ? colors[Random.Range(0, colors.Length)] : Snow;
+            LowPolyBuilder.Part(chunk, "Chunk", LowPolyBuilder.Box, color, Vector3.zero, Vector3.one * Random.Range(0.05f, 0.12f));
+
+            var spray = chunk.gameObject.AddComponent<SnowSpray>();
+            spray.velocity = Random.onUnitSphere * Random.Range(0.5f, 1f) * speed + Vector3.up * 1.5f;
+            spray.startScale = chunk.localScale;
+            spray.lifetime = Random.Range(0.35f, 0.6f);
+        }
+    }
+
     void Update()
     {
         age += Time.deltaTime;
