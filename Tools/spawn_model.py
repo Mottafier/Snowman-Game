@@ -39,6 +39,17 @@ Guidelines:
 - People and characters: make them recognizable through build, clothing, hair, colors and signature accessories.
 - Abstract words or actions: build the most iconic object or symbol associated with them.
 - name: a short display name for the model.
+
+Every model comes alive as an enemy that chases and attacks the player, who fights back with snowballs
+(25 damage each; the player has 100 HP). Pick a behavior that suits what the thing is:
+- movement: walk (steady), hop (bouncing jumps), fly (hovers above the ground), charge (winds up, then dashes),
+  zigzag (weaves side to side)
+- speed: meters per second, 0.3 (crawling) to 2 (very fast). The player is slow (1 to 3.5 depending on how much
+  snow they carry), so most enemies should be 0.5 to 1.2 and only a rare few above 1.5
+- attack: melee (lunges and hits up close), ranged (throws shots from a distance), explode (runs up and blows up, once)
+- damage per hit, 1 to 50; attackRange in meters (melee 0.8-3, ranged 3-15, explode 1-4);
+  attackCooldown in seconds between attacks (0.4-6); health 25 to 400
+Keep it fair and fun: fast or hard-hitting enemies should be fragile, and tough ones slow.
 """
 
 VECTOR = {
@@ -72,8 +83,22 @@ MODEL_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "behavior": {
+            "type": "object",
+            "properties": {
+                "movement": {"type": "string", "enum": ["walk", "hop", "fly", "charge", "zigzag"]},
+                "speed": {"type": "number"},
+                "attack": {"type": "string", "enum": ["melee", "ranged", "explode"]},
+                "damage": {"type": "integer"},
+                "attackRange": {"type": "number"},
+                "attackCooldown": {"type": "number"},
+                "health": {"type": "integer"},
+            },
+            "required": ["movement", "speed", "attack", "damage", "attackRange", "attackCooldown", "health"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["name", "parts"],
+    "required": ["name", "parts", "behavior"],
     "additionalProperties": False,
 }
 
@@ -175,7 +200,10 @@ def main():
             print("  The game stopped before the model could be sent.\n")
             continue
 
-        print(f"  Spawned {spec['name']} ({len(spec['parts'])} parts, {time.time() - started:.0f}s)\n")
+        b = spec["behavior"]
+        print(f"  Spawned {spec['name']} ({len(spec['parts'])} parts, {time.time() - started:.0f}s)")
+        moves = {"fly": "flies"}.get(b["movement"], b["movement"] + "s")
+        print(f"  It {moves} at {b['speed']:g} m/s, {b['attack']} attack for {b['damage']} damage, {b['health']} HP\n")
 
     return 0
 
