@@ -30,8 +30,10 @@ public class ModelEnemy : MonoBehaviour
     private const float SlowSeconds = 2f;
     private const float HealRadius = 6f;
     private const float HealInterval = 3f;
-    private const float BurrowSeconds = 0.4f;
-    private const float SurfacedSeconds = 3f;
+    private const float BurrowSeconds = 0.4f;     // time to dig down or pop up
+    private const float ZipSpeed = 8f;            // underground speed: far faster than the player
+    private const float ZipTurnDegreesPerSecond = 200f;
+    private const float SprayPerSecond = 30f;     // snow chunks kicked up while zipping
 
     private static readonly Color HealGreen = new Color(0.3f, 0.95f, 0.4f);
     private static readonly Color EnrageRed = new Color(0.95f, 0.15f, 0.1f);
@@ -45,6 +47,7 @@ public class ModelEnemy : MonoBehaviour
     private Transform player;
     private PlayerHealth playerHealth;
     private EnemyHealth health;
+    private ModelHealthBar healthBar;
     private Transform body;
     private Vector3 bodyRestPosition;
     private Vector3 baseScale;
@@ -72,10 +75,19 @@ public class ModelEnemy : MonoBehaviour
     // Teleport movement: blink to a new spot near the player every few seconds
     private float teleportTimer = 3f;
 
-    // Burrow movement: travel underground, surface near the player to attack, then dig back down
-    private bool burrowed = true;
+    // Burrow movement: dive, zip around underground for 5-10 s (swooping past and looping around the player),
+    // then pop up at attack distance, attack for a few seconds, and dive again
+    private enum BurrowPhase { Surfaced, Diving, Zipping, Surfacing }
+    private BurrowPhase burrowPhase = BurrowPhase.Surfaced;
     private float burrowOffset;
-    private float surfacedTimer;
+    private float surfacedTimer = 0.5f;
+    private float undergroundTimer;
+    private Vector3 zipHeading;
+    private Vector3 zipWaypoint;
+    private float waypointTimer;
+    private Vector3 popUpSpot;
+    private bool popUpChosen;
+    private float sprayBuildup;
 
     // Orbit movement: circle the player, clockwise or counterclockwise
     private float orbitDirection = 1f;
@@ -110,7 +122,7 @@ public class ModelEnemy : MonoBehaviour
         health = gameObject.AddComponent<EnemyHealth>();
         health.hpMax = behavior.health;
         health.Died += OnDied;
-        ModelHealthBar.Attach(health, height, radius * 2f);
+        healthBar = ModelHealthBar.Attach(health, height, radius * 2f);
     }
 
     // Keep whatever Claude picked within playable limits
@@ -183,7 +195,7 @@ public class ModelEnemy : MonoBehaviour
         Move(direction, distance, distance > stopDistance);
 
         // Burrowers can only attack once they've fully surfaced
-        bool canAttack = behavior.movement != "burrow" || (!burrowed && burrowOffset > -0.05f);
+        bool canAttack = behavior.movement != "burrow" || burrowPhase == BurrowPhase.Surfaced;
 
         cooldown -= Time.deltaTime;
         if (canAttack && distance <= behavior.attackRange && cooldown <= 0f)
@@ -239,7 +251,7 @@ public class ModelEnemy : MonoBehaviour
                 }
                 break;
             case "burrow":
-                position = Burrow(position, direction, advance);
+                position = Burrow(position);
                 lift = burrowOffset;
                 break;
             case "orbit":
@@ -329,31 +341,111 @@ public class ModelEnemy : MonoBehaviour
         busy = false;
     }
 
-    // Underground it moves faster and can't be hit (only its health bar shows above the snow);
-    // once close enough it surfaces for a few seconds to attack, then digs back down
-    private Vector3 Burrow(Vector3 position, Vector3 direction, bool advance)
+    // Underground it can't be hit, its health bar is hidden, and it zips around far faster than the player,
+    // leaving a trail of snow spraying up from the ground. Every 5-10 s it pops up at attack distance,
+    // attacks for a few seconds, then dives again.
+    private Vector3 Burrow(Vector3 position)
     {
-        if (burrowed)
-        {
-            if (advance)
-                position += direction * Speed * 1.5f * Time.deltaTime;
-            else if (burrowOffset <= -height)
-            {
-                burrowed = false;
-                surfacedTimer = SurfacedSeconds;
-            }
-        }
-        else
-        {
-            surfacedTimer -= Time.deltaTime;
-            if (surfacedTimer <= 0f || advance)
-                burrowed = true;
-        }
-
         float depth = height + 0.2f;
-        burrowOffset = Mathf.MoveTowards(burrowOffset, burrowed ? -depth : 0f, depth / BurrowSeconds * Time.deltaTime);
+        float digSpeed = depth / BurrowSeconds * Time.deltaTime;
+        Vector3 groundPoint = new Vector3(position.x, groundY, position.z);
+
+        switch (burrowPhase)
+        {
+            case BurrowPhase.Surfaced:
+                surfacedTimer -= Time.deltaTime;
+                if (surfacedTimer <= 0f)
+                {
+                    burrowPhase = BurrowPhase.Diving;
+                    healthBar.SetVisible(false);
+                    SnowSpray.Emit(groundPoint, 15);
+                }
+                break;
+
+            case BurrowPhase.Diving:
+                burrowOffset = Mathf.MoveTowards(burrowOffset, -depth, digSpeed);
+                if (burrowOffset <= -depth)
+                {
+                    burrowPhase = BurrowPhase.Zipping;
+                    undergroundTimer = Random.Range(5f, 10f);
+                    popUpChosen = false;
+                    zipHeading = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+                    PickZipWaypoint();
+                }
+                break;
+
+            case BurrowPhase.Zipping:
+            {
+                undergroundTimer -= Time.deltaTime;
+                waypointTimer -= Time.deltaTime;
+
+                // Time's up: head for a spot at attack distance from the player and pop up there
+                if (undergroundTimer <= 0f && !popUpChosen)
+                {
+                    float angle = Random.value * Mathf.PI * 2f;
+                    float distance = (IsShooter ? Mathf.Max(3f, behavior.attackRange * 0.6f) : behavior.attackRange * 0.5f) + radius;
+                    popUpSpot = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * distance;
+                    popUpChosen = true;
+                }
+
+                Vector3 target;
+                if (popUpChosen)
+                {
+                    target = player.position + popUpSpot;
+                }
+                else
+                {
+                    if (waypointTimer <= 0f || Vector3.Distance(Flat(position), Flat(zipWaypoint)) < 1.5f)
+                        PickZipWaypoint();
+                    target = zipWaypoint;
+                }
+
+                // Steer with a limited turn rate so it swoops and loops instead of moving in straight lines
+                Vector3 desired = Flat(target - position);
+                if (desired.sqrMagnitude > 0.01f)
+                    zipHeading = Vector3.RotateTowards(zipHeading, desired.normalized, ZipTurnDegreesPerSecond * Mathf.Deg2Rad * Time.deltaTime, 0f);
+                position += zipHeading * ZipSpeed * Time.deltaTime;
+
+                sprayBuildup += SprayPerSecond * Time.deltaTime;
+                if (sprayBuildup >= 1f)
+                {
+                    SnowSpray.Emit(new Vector3(position.x, groundY, position.z), (int)sprayBuildup, 0.7f);
+                    sprayBuildup -= (int)sprayBuildup;
+                }
+
+                bool arrived = popUpChosen && Vector3.Distance(Flat(position), Flat(target)) < 1.2f;
+                if (arrived || undergroundTimer < -4f)
+                {
+                    burrowPhase = BurrowPhase.Surfacing;
+                    transform.rotation = Quaternion.LookRotation(Flat(player.position - position).normalized);
+                    healthBar.SetVisible(true);
+                    SnowSpray.Emit(new Vector3(position.x, groundY, position.z), 25, 1.4f);
+                }
+                break;
+            }
+
+            case BurrowPhase.Surfacing:
+                burrowOffset = Mathf.MoveTowards(burrowOffset, 0f, digSpeed);
+                if (burrowOffset >= 0f)
+                {
+                    burrowPhase = BurrowPhase.Surfaced;
+                    surfacedTimer = Random.Range(2.5f, 3.5f);
+                    cooldown = Mathf.Min(cooldown, 0.3f); // attack right after popping up
+                }
+                break;
+        }
         return position;
     }
+
+    // A random spot 4-14 m from the player to swoop toward while underground
+    private void PickZipWaypoint()
+    {
+        float angle = Random.value * Mathf.PI * 2f;
+        zipWaypoint = player.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * Random.Range(4f, 14f);
+        waypointTimer = 2f;
+    }
+
+    private static Vector3 Flat(Vector3 v) => new Vector3(v.x, 0f, v.z);
 
     // ---------- Attacks ----------
 

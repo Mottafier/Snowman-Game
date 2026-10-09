@@ -49,7 +49,8 @@ Every model comes alive as an enemy that chases and attacks the player, who figh
 (25 damage each; the player has 100 HP). Pick a behavior that suits what the thing is:
 - movement: walk (steady), hop (bouncing jumps), fly (hovers above the ground), charge (winds up, then dashes),
   zigzag (weaves side to side), teleport (blinks to a new spot near the player every few seconds),
-  burrow (travels underground where it can't be hit, pops up near the player to attack, then digs back down),
+  burrow (zips around underground very fast for 5-10 seconds where it can't be hit, then pops up at attack
+  distance and attacks for about 3 seconds before diving again; its speed only matters above ground),
   orbit (circles the player at attack distance)
 - speed: meters per second, 0.3 (crawling) to 2 (very fast). The player is slow (1 to 3.5 depending on how much
   snow they carry), so most enemies should be 0.5 to 1.2 and only a rare few above 1.5
