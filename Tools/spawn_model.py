@@ -48,20 +48,30 @@ Guidelines:
 Every model comes alive as an enemy that chases and attacks the player, who fights back with snowballs
 (25 damage each; the player has 100 HP). Pick a behavior that suits what the thing is:
 - movement: walk (steady), hop (bouncing jumps), fly (hovers above the ground), charge (winds up, then dashes),
-  zigzag (weaves side to side)
+  zigzag (weaves side to side), teleport (blinks to a new spot near the player every few seconds),
+  burrow (travels underground where it can't be hit, pops up near the player to attack, then digs back down),
+  orbit (circles the player at attack distance)
 - speed: meters per second, 0.3 (crawling) to 2 (very fast). The player is slow (1 to 3.5 depending on how much
   snow they carry), so most enemies should be 0.5 to 1.2 and only a rare few above 1.5
-- attack: melee (lunges and hits up close), ranged (throws shots from a distance), explode (runs up and blows up, once)
-- damage per hit, 1 to 50; attackRange in meters (melee 0.8-3, ranged 3-15, explode 1-4);
-  attackCooldown in seconds between attacks (0.4-6); health 25 to 400
-Keep it fair and fun: fast or hard-hitting enemies should be fragile, and tough ones slow.
+- attack: melee (lunges and hits up close), ranged (one shot from a distance), burst (three quick shots in a row),
+  spread (five shots fanned out like a shotgun), homing (one slow shot that curves after the player),
+  slam (jumps and crashes down, hitting everything within range), explode (runs up and blows up, once)
+- damage per hit, 1 to 50; attackRange in meters (melee 0.8-3; ranged, burst, spread and homing 3-15; slam 1.5-4;
+  explode 1-4); attackCooldown in seconds between attacks (0.4-6); health 25 to 400.
+  Burst and spread fire several shots, so give them lower damage per shot.
+- special: none, splits (breaks into two smaller, weaker copies when killed), heals (every few seconds heals other
+  hurt enemies nearby), slows (its hits slow the player for 2 seconds), enrages (below half health it gets faster
+  and attacks more often). Most enemies should have none; use one when it really fits the thing (a slime splits,
+  a medic heals, a snowman or ice monster slows, a bull or angry bear enrages).
+Keep it fair and fun: fast or hard-hitting enemies should be fragile, and tough ones slow. Use the variety:
+pick the movement and attack that best match how the thing would really move and fight.
 
-projectile: what a ranged enemy throws or shoots, designed with the same shapes and coordinates but centered
+projectile: what a ranged, burst, spread or homing enemy throws or shoots, designed with the same shapes and coordinates but centered
 on the origin, with its front (the end that leads in flight) facing +Z. Keep it simple (1 to 12 parts) and make it
 fit the enemy: a deck of cards throws a playing card, a cactus fires a spine, a pirate ship fires a cannonball.
 The game resizes it, so use the real proportions. spin: none, spin (flat like a frisbee or thrown card),
 roll (around its flight direction like a bullet or football) or tumble (end over end like a thrown axe).
-For melee and explode enemies, give an empty parts list and spin none.
+For melee, slam and explode enemies, give an empty parts list and spin none.
 """
 
 VECTOR = {
@@ -98,15 +108,16 @@ MODEL_SCHEMA = {
         "behavior": {
             "type": "object",
             "properties": {
-                "movement": {"type": "string", "enum": ["walk", "hop", "fly", "charge", "zigzag"]},
+                "movement": {"type": "string", "enum": ["walk", "hop", "fly", "charge", "zigzag", "teleport", "burrow", "orbit"]},
                 "speed": {"type": "number"},
-                "attack": {"type": "string", "enum": ["melee", "ranged", "explode"]},
+                "attack": {"type": "string", "enum": ["melee", "ranged", "burst", "spread", "homing", "slam", "explode"]},
                 "damage": {"type": "integer"},
                 "attackRange": {"type": "number"},
                 "attackCooldown": {"type": "number"},
                 "health": {"type": "integer"},
+                "special": {"type": "string", "enum": ["none", "splits", "heals", "slows", "enrages"]},
             },
-            "required": ["movement", "speed", "attack", "damage", "attackRange", "attackCooldown", "health"],
+            "required": ["movement", "speed", "attack", "damage", "attackRange", "attackCooldown", "health", "special"],
             "additionalProperties": False,
         },
         "projectile": {
@@ -226,7 +237,8 @@ def main():
         what = spec["name"] if count == 1 else f"{count} x {spec['name']}"
         print(f"  Spawned {what} ({len(spec['parts'])} parts each, {time.time() - started:.0f}s)")
         moves = {"fly": "flies"}.get(b["movement"], b["movement"] + "s")
-        print(f"  {'It' if count == 1 else 'Each'} {moves} at {b['speed']:g} m/s, {b['attack']} attack for {b['damage']} damage, {b['health']} HP\n")
+        print(f"  {'It' if count == 1 else 'Each'} {moves} at {b['speed']:g} m/s, {b['attack']} attack for {b['damage']} damage, {b['health']} HP"
+              + ("" if b.get("special", "none") == "none" else f", special: {b['special']}") + "\n")
 
     return 0
 
