@@ -8,6 +8,7 @@ using UnityEngine;
 public class ModelRecipe
 {
     public string name;
+    public int count = 1; // how many copies to spawn
     public PartSpec[] parts;
     public ModelEnemy.BehaviorSpec behavior;
     public ProjectileSpec projectile;

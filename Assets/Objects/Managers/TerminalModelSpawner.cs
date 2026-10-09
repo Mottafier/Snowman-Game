@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -9,10 +10,16 @@ using System.Threading;
 using UnityEngine;
 
 // Listens on localhost for low poly model recipes sent from the terminal (Tools/spawn-model.cmd)
-// and builds each one in front of the player.
+// and builds each one (or a whole group of copies) in front of the player as enemies.
 public class TerminalModelSpawner : MonoBehaviour
 {
     public const int Port = 5055;
+
+    // Limits that keep big groups ("an army of bananas") from overwhelming the game
+    private const int MaxPerRequest = 50;
+    private const int MaxPartsPerRequest = 3000;
+    private const int MaxAliveEnemies = 100;
+    private const int SpawnsPerFrame = 5;
 
     [SerializeField] private float gapInFrontOfPlayer = 1.5f;
     [SerializeField] private float minModelSize = 0.3f;
@@ -22,6 +29,7 @@ public class TerminalModelSpawner : MonoBehaviour
     private TcpListener listener;
     private Thread listenThread;
     private readonly ConcurrentQueue<string> pending = new ConcurrentQueue<string>();
+    private readonly List<GameObject> spawned = new List<GameObject>();
 
     // Create the spawner automatically so it doesn't need to be added to the scene
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -122,7 +130,14 @@ public class TerminalModelSpawner : MonoBehaviour
             return;
         }
 
-        // Build the model at the origin so its bounds are easy to measure
+        int count = AllowedCount(spec);
+        if (count <= 0)
+        {
+            Debug.LogWarning($"TerminalModelSpawner: already {MaxAliveEnemies} enemies alive; defeat some before spawning \"{spec.name}\"");
+            return;
+        }
+
+        // Build the model once at the origin so its bounds are easy to measure; every copy is cloned from it
         Transform model = ModelRecipe.Build(spec.parts);
         Bounds bounds = ModelRecipe.MeasureBounds(model);
 
@@ -132,46 +147,84 @@ public class TerminalModelSpawner : MonoBehaviour
                     : largest < minModelSize ? minModelSize / largest
                     : 1f;
 
-        // The holder sits on the ground in front of the player; the model is offset so its base and center line up with it
-        var holder = new GameObject(spec.name).transform;
-        model.SetParent(holder, false);
+        // The holder sits on the ground; the model is offset so its base and center line up with it
+        var prototype = new GameObject(spec.name).transform;
+        model.SetParent(prototype, false);
         model.localPosition = new Vector3(-bounds.center.x, -bounds.min.y, -bounds.center.z);
 
-        Vector3 forward = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up);
-        if (forward.sqrMagnitude < 0.001f)
-            forward = Vector3.ProjectOnPlane(cam.transform.up, Vector3.up);
-        forward.Normalize();
-
-        float depth = Mathf.Max(bounds.size.x, bounds.size.z) * scale;
-        Vector3 spot = cam.transform.position + forward * (gapInFrontOfPlayer + depth / 2f);
-        spot.y = GroundHeight(spot, cam.transform.position.y);
-
-        holder.SetPositionAndRotation(spot, Quaternion.LookRotation(-forward, Vector3.up));
-
         // One box around the whole model so snowballs can hit it
-        var box = holder.gameObject.AddComponent<BoxCollider>();
+        var box = prototype.gameObject.AddComponent<BoxCollider>();
         box.center = new Vector3(0f, bounds.size.y / 2f, 0f);
         box.size = bounds.size;
 
-        StartCoroutine(PopIn(holder, scale, () =>
-        {
-            if (spec.behavior != null)
-            {
-                float radius = Mathf.Max(bounds.size.x, bounds.size.z) * scale / 2f;
-                holder.gameObject.AddComponent<ModelEnemy>().Configure(spec.behavior, spec.projectile, model, radius, bounds.size.y * scale);
-            }
-        }));
+        prototype.gameObject.SetActive(false);
+        StartCoroutine(SpawnGroup(spec, prototype, bounds, scale, count, cam.transform));
 
-        Debug.Log($"TerminalModelSpawner: spawned \"{spec.name}\" ({spec.parts.Length} parts)");
+        Debug.Log($"TerminalModelSpawner: spawning {count} x \"{spec.name}\" ({spec.parts.Length} parts each)");
     }
 
-    // Find the ground under a point, ignoring anything we hit above the player's eyes
-    private static float GroundHeight(Vector3 point, float eyeHeight)
+    // How many copies to actually spawn: what Claude asked for, within the per-request and alive limits
+    private int AllowedCount(ModelRecipe spec)
+    {
+        spawned.RemoveAll(enemy => enemy == null);
+
+        int count = Mathf.Clamp(spec.count, 1, MaxPerRequest);
+        count = Mathf.Min(count, Mathf.Max(1, MaxPartsPerRequest / spec.parts.Length));
+        return Mathf.Min(count, MaxAliveEnemies - spawned.Count);
+    }
+
+    // Places the copies in a sunflower-pattern cluster in front of the player, a few per frame to avoid a hitch
+    private IEnumerator SpawnGroup(ModelRecipe spec, Transform prototype, Bounds bounds, float scale, int count, Transform cam)
+    {
+        Vector3 forward = Vector3.ProjectOnPlane(cam.forward, Vector3.up);
+        if (forward.sqrMagnitude < 0.001f)
+            forward = Vector3.ProjectOnPlane(cam.up, Vector3.up);
+        forward.Normalize();
+        Quaternion facePlayer = Quaternion.LookRotation(-forward, Vector3.up);
+
+        float footprint = Mathf.Max(bounds.size.x, bounds.size.z) * scale;
+        float spacing = footprint * 1.2f + 0.3f;
+        float clusterRadius = count > 1 ? spacing * 0.6f * Mathf.Sqrt(count) : 0f;
+        Vector3 center = cam.position + forward * (gapInFrontOfPlayer + footprint / 2f + clusterRadius);
+
+        for (int i = 0; i < count; i++)
+        {
+            float angle = i * 137.5f * Mathf.Deg2Rad;
+            float distance = spacing * 0.6f * Mathf.Sqrt(i);
+            Vector3 spot = center + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * distance;
+            spot.y = GroundHeight(spot, cam.position.y);
+
+            Transform holder = Instantiate(prototype, spot, facePlayer);
+            holder.name = spec.name;
+            holder.localScale = Vector3.zero;
+            holder.gameObject.SetActive(true);
+            spawned.Add(holder.gameObject);
+
+            Transform model = holder.Find("Model");
+            StartCoroutine(PopIn(holder, scale, () =>
+            {
+                if (spec.behavior != null)
+                    holder.gameObject.AddComponent<ModelEnemy>().Configure(spec.behavior, spec.projectile, model, footprint / 2f, bounds.size.y * scale);
+            }));
+
+            if (i % SpawnsPerFrame == SpawnsPerFrame - 1)
+                yield return null;
+        }
+
+        Destroy(prototype.gameObject);
+    }
+
+    // Find the ground under a point, ignoring spawned enemies and anything above the player's eyes
+    private float GroundHeight(Vector3 point, float eyeHeight)
     {
         var from = new Vector3(point.x, eyeHeight, point.z);
-        if (Physics.Raycast(from, Vector3.down, out RaycastHit hit, 50f, ~0, QueryTriggerInteraction.Ignore))
-            return hit.point.y;
-        return 0f;
+        float ground = float.NegativeInfinity;
+        foreach (RaycastHit hit in Physics.RaycastAll(from, Vector3.down, 50f, ~0, QueryTriggerInteraction.Ignore))
+        {
+            if (!spawned.Contains(hit.collider.gameObject))
+                ground = Mathf.Max(ground, hit.point.y);
+        }
+        return float.IsNegativeInfinity(ground) ? 0f : ground;
     }
 
     // onDone runs once the model has reached full size (EnemyHealth remembers the scale it starts at)
