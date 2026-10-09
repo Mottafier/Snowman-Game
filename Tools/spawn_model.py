@@ -161,6 +161,7 @@ def design_model(claude, prompt):
         "--system-prompt", SYSTEM_PROMPT,
         "--json-schema", json.dumps(MODEL_SCHEMA),
         "--output-format", "json",
+        "--model", "haiku",  # fastest model, so spawns come back quickly
         "--effort", "medium",
         "--tools", "",
         "--strict-mcp-config",
