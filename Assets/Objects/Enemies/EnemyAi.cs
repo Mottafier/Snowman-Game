@@ -12,6 +12,7 @@ public class EnemyAi : MonoBehaviour
     public float sped;
 
     private Vector3 target;
+    private bool attacking; // mid-telegraph: stand still, then strike
 
     [SerializeField] private LayerMask enemyLayer;
     [SerializeField] private LayerMask wallLayer;
@@ -30,6 +31,11 @@ public class EnemyAi : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        if (attacking)
+        {
+            sped = 0f;
+            return;
+        }
 
         if(Random.value < 0.01f) // 1% chance to change state each frame
         {
@@ -62,8 +68,7 @@ public class EnemyAi : MonoBehaviour
         {
             if(state!= EnemyState.Idle)
             {
-                Instantiate(myAttack, transform.position, Quaternion.identity);
-                state = EnemyState.Idle;
+                StartCoroutine(TelegraphThenAttack());
             }
             state = EnemyState.Idle;
         }
@@ -71,6 +76,16 @@ public class EnemyAi : MonoBehaviour
         {
             state = EnemyState.Pursuing;
         }
+    }
+
+    // Flash white and swell, pause, then attack
+    System.Collections.IEnumerator TelegraphThenAttack()
+    {
+        attacking = true;
+        sped = 0f;
+        yield return AttackTelegraph.Play(transform, transform);
+        Instantiate(myAttack, transform.position, Quaternion.identity);
+        attacking = false;
     }
 
     void CheckEnemyCollisions()

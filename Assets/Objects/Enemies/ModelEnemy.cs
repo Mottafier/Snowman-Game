@@ -50,6 +50,7 @@ public class ModelEnemy : MonoBehaviour
     private ModelHealthBar healthBar;
     private Transform body;
     private Vector3 bodyRestPosition;
+    private Vector3 bodyRestScale;
     private Vector3 baseScale;
     private GameObject projectileTemplate; // hidden copy that each shot is cloned from
     private string projectileSpin;
@@ -106,6 +107,7 @@ public class ModelEnemy : MonoBehaviour
         projectileSpec = projectile;
         body = model;
         bodyRestPosition = model.localPosition;
+        bodyRestScale = model.localScale;
         baseScale = transform.localScale;
         radius = footprintRadius;
         height = modelHeight;
@@ -201,7 +203,7 @@ public class ModelEnemy : MonoBehaviour
         if (canAttack && distance <= behavior.attackRange && cooldown <= 0f)
         {
             cooldown = behavior.attackCooldown * (enraged ? 0.6f : 1f);
-            Attack(direction);
+            StartCoroutine(TelegraphThenAttack());
         }
     }
 
@@ -449,6 +451,17 @@ public class ModelEnemy : MonoBehaviour
 
     // ---------- Attacks ----------
 
+    // Flash white, swell, freeze for a moment, then attack toward wherever the player is now
+    private IEnumerator TelegraphThenAttack()
+    {
+        busy = true;
+        yield return AttackTelegraph.Play(body, body);
+        busy = false;
+
+        Vector3 toPlayer = Flat(player.position - transform.position);
+        Attack(toPlayer.sqrMagnitude > 0.0001f ? toPlayer.normalized : transform.forward);
+    }
+
     private void Attack(Vector3 direction)
     {
         switch (behavior.attack)
@@ -657,6 +670,7 @@ public class ModelEnemy : MonoBehaviour
         Transform model = Instantiate(body, piece, false);
         model.name = "Model";
         model.localPosition = bodyRestPosition;
+        model.localScale = bodyRestScale; // in case it died mid-telegraph while swollen
 
         var sourceBox = GetComponent<BoxCollider>();
         var box = piece.gameObject.AddComponent<BoxCollider>();
