@@ -34,6 +34,10 @@ public class ModelEnemy : MonoBehaviour
     private const float ZipSpeed = 8f;            // underground speed: far faster than the player
     private const float ZipTurnDegreesPerSecond = 200f;
     private const float SprayPerSecond = 30f;     // snow chunks kicked up while zipping
+    private const float ClimbSpeed = 3f;          // how fast an enemy scrambles up onto another's head
+    private const float FallGravity = 20f;
+    private const float SeparateSpeed = 3f;       // how hard side-by-side enemies push apart
+    private const float MaxStackHeight = 6f;      // don't build towers taller than this
 
     private static readonly Color HealGreen = new Color(0.3f, 0.95f, 0.4f);
     private static readonly Color EnrageRed = new Color(0.95f, 0.15f, 0.1f);
@@ -93,12 +97,26 @@ public class ModelEnemy : MonoBehaviour
     // Orbit movement: circle the player, clockwise or counterclockwise
     private float orbitDirection = 1f;
 
+    // Crowding: how high it's standing on top of other enemies, and what it's doing this frame
+    private float standHeight;
+    private float fallSpeed;
+    private float lift; // hop/hover/burrow offset on top of standHeight
+    private Vector3 moveDirection;
+    private bool advancing;
+
     private bool IsShooter => behavior.attack == "ranged" || behavior.attack == "burst"
                            || behavior.attack == "spread" || behavior.attack == "homing";
 
     private float Speed => enraged ? Mathf.Min(behavior.speed * 1.5f, MaxEnragedSpeed) : behavior.speed;
 
     private bool Slows => behavior.special == "slows";
+
+    // Who crowds with whom: walkers stack on each other, flyers only push apart from other flyers,
+    // and burrowers underground don't touch anyone
+    private enum CrowdLayer { None, Ground, Air }
+    private CrowdLayer Layer => behavior.movement == "fly" ? CrowdLayer.Air
+                              : behavior.movement == "burrow" && burrowPhase != BurrowPhase.Surfaced ? CrowdLayer.None
+                              : CrowdLayer.Ground;
 
     public void Configure(BehaviorSpec spec, ModelRecipe.ProjectileSpec projectile, Transform model,
         float footprintRadius, float modelHeight, bool splitPiece = false)
@@ -180,7 +198,13 @@ public class ModelEnemy : MonoBehaviour
             Enrage();
 
         if (busy)
+        {
+            // Still get shoved and fall while attacking or teleporting
+            Vector3 settled = Crowd(transform.position, transform.forward, false);
+            settled.y = groundY + standHeight + lift;
+            transform.position = settled;
             return;
+        }
 
         Vector3 toPlayer = player.position - transform.position;
         toPlayer.y = 0f;
@@ -213,7 +237,7 @@ public class ModelEnemy : MonoBehaviour
     {
         Vector3 position = transform.position;
         float step = Speed * Time.deltaTime;
-        float lift = 0f;
+        lift = 0f;
 
         switch (behavior.movement)
         {
@@ -271,8 +295,78 @@ public class ModelEnemy : MonoBehaviour
                 break;
         }
 
-        position.y = groundY + lift;
+        position = Crowd(position, direction, advance);
+        position.y = groundY + standHeight + lift;
         transform.position = position;
+    }
+
+    // Megabonk-style crowding. Enemies side by side push apart. One that's heading for the player with
+    // another enemy blocking the way climbs up onto its head, rides along up there, and falls off
+    // when it walks off the edge or the one underneath dies.
+    private Vector3 Crowd(Vector3 position, Vector3 direction, bool advance)
+    {
+        moveDirection = direction;
+        advancing = advance;
+        CrowdLayer layer = Layer;
+        float support = 0f;    // height of the highest head it's standing on
+        float climbTo = -1f;   // height of the head it's climbing onto, if any
+
+        if (layer != CrowdLayer.None)
+        {
+            foreach (ModelEnemy other in active)
+            {
+                if (other == this || other.behavior == null || other.Layer != layer)
+                    continue;
+
+                Vector3 away = Flat(position - other.transform.position);
+                float gap = away.magnitude;
+                float reach = (radius + other.radius) * 0.8f;
+                if (gap >= reach)
+                    continue;
+                Vector3 awayDir = gap > 0.001f ? away / gap : Quaternion.Euler(0f, Random.value * 360f, 0f) * Vector3.forward;
+
+                if (layer == CrowdLayer.Ground)
+                {
+                    float otherTop = other.standHeight + other.height;
+                    if (standHeight >= otherTop - 0.05f)
+                    {
+                        support = Mathf.Max(support, otherTop); // standing on its head
+                        continue;
+                    }
+                    if (other.standHeight > standHeight + 0.05f)
+                        continue; // it's climbing on or standing on me: its job, not mine
+
+                    // Blocked by it on the way to the player: climb. If we're both blocked by each other, only one climbs.
+                    bool inMyWay = Vector3.Dot(direction, -awayDir) > 0.3f;
+                    bool imInItsWay = other.advancing && Vector3.Dot(other.moveDirection, awayDir) > 0.3f;
+                    if (advance && inMyWay && otherTop <= MaxStackHeight
+                        && (!imInItsWay || GetInstanceID() < other.GetInstanceID()))
+                    {
+                        climbTo = Mathf.Max(climbTo, otherTop);
+                        continue;
+                    }
+                }
+
+                position += awayDir * Mathf.Min(reach - gap, SeparateSpeed * Time.deltaTime);
+            }
+        }
+
+        if (climbTo > standHeight)
+        {
+            standHeight = Mathf.MoveTowards(standHeight, climbTo, ClimbSpeed * Time.deltaTime);
+            fallSpeed = 0f;
+        }
+        else if (standHeight > support)
+        {
+            fallSpeed += FallGravity * Time.deltaTime;
+            standHeight = Mathf.Max(support, standHeight - fallSpeed * Time.deltaTime);
+        }
+        else
+        {
+            standHeight = support;
+            fallSpeed = 0f;
+        }
+        return position;
     }
 
     private Vector3 Charge(Vector3 position, Vector3 direction, bool advance)
