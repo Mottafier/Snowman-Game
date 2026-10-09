@@ -38,6 +38,9 @@ public class ModelEnemy : MonoBehaviour
     private const float FallGravity = 20f;
     private const float SeparateSpeed = 3f;       // how hard side-by-side enemies push apart
     private const float MaxStackHeight = 6f;      // don't build towers taller than this
+    private const float ClimbPatience = 0.5f;     // seconds stuck behind another enemy before climbing it
+    private const float SpreadDegrees = 45f;      // enemies try to keep this far apart around the player
+    private const float WobbleDegrees = 20f;      // how much they weave left and right while approaching
 
     private static readonly Color HealGreen = new Color(0.3f, 0.95f, 0.4f);
     private static readonly Color EnrageRed = new Color(0.95f, 0.15f, 0.1f);
@@ -103,11 +106,19 @@ public class ModelEnemy : MonoBehaviour
     private float lift; // hop/hover/burrow offset on top of standHeight
     private Vector3 moveDirection;
     private bool advancing;
+    private bool climbing;
+    private float blockedTimer;
+
+    // Natural variation, so a crowd surrounds the player instead of funnelling into one spot
+    private float surroundAngle;   // where around the player (degrees) this enemy wants to stand
+    private bool hasSurroundAngle;
+    private float speedScale = 1f;
+    private float wanderSeed;
 
     private bool IsShooter => behavior.attack == "ranged" || behavior.attack == "burst"
                            || behavior.attack == "spread" || behavior.attack == "homing";
 
-    private float Speed => enraged ? Mathf.Min(behavior.speed * 1.5f, MaxEnragedSpeed) : behavior.speed;
+    private float Speed => (enraged ? Mathf.Min(behavior.speed * 1.5f, MaxEnragedSpeed) : behavior.speed) * speedScale;
 
     private bool Slows => behavior.special == "slows";
 
@@ -132,6 +143,8 @@ public class ModelEnemy : MonoBehaviour
         groundY = transform.position.y;
         cooldown = behavior.attackCooldown * 0.5f;
         orbitDirection = Random.value < 0.5f ? -1f : 1f;
+        speedScale = Random.Range(0.85f, 1.15f);
+        wanderSeed = Random.Range(0f, 100f);
         isSplitPiece = splitPiece;
         if (splitPiece)
             wakeTimer = 0.5f;
@@ -212,13 +225,21 @@ public class ModelEnemy : MonoBehaviour
         Vector3 direction = centerDistance > 0.01f ? toPlayer / centerDistance : transform.forward;
         float distance = Mathf.Max(0f, centerDistance - radius);
 
-        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(direction), 8f * Time.deltaTime);
-
         // Shooters keep their distance; everyone else closes in
         float stopDistance = IsShooter ? behavior.attackRange * 0.75f
                            : behavior.attack == "explode" ? 0.3f
                            : behavior.attackRange * 0.6f;
-        Move(direction, distance, distance > stopDistance);
+
+        bool advance = distance > stopDistance;
+        Vector3 travel = direction;
+        if (behavior.movement != "orbit")
+            travel = Steer(direction, centerDistance, stopDistance, out advance);
+
+        // Face where it's walking while it's still on its way, and the player once it's close
+        Vector3 facing = advance && distance > stopDistance + 1f ? travel : direction;
+        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(facing), 8f * Time.deltaTime);
+
+        Move(travel, distance, advance);
 
         // Burrowers can only attack once they've fully surfaced
         bool canAttack = behavior.movement != "burrow" || burrowPhase == BurrowPhase.Surfaced;
@@ -232,6 +253,40 @@ public class ModelEnemy : MonoBehaviour
     }
 
     // ---------- Movement ----------
+
+    // Instead of everyone heading for the player's exact position, each enemy heads for its own spot on a ring
+    // around them (starting from the side it's already on), drifts away from spots other enemies have taken,
+    // and weaves a little on the way in, so crowds surround the player rather than piling up in one place.
+    private Vector3 Steer(Vector3 toPlayer, float centerDistance, float stopDistance, out bool advance)
+    {
+        if (!hasSurroundAngle)
+        {
+            surroundAngle = Mathf.Atan2(-toPlayer.z, -toPlayer.x) * Mathf.Rad2Deg + Random.Range(-50f, 50f);
+            hasSurroundAngle = true;
+        }
+
+        foreach (ModelEnemy other in active)
+        {
+            if (other == this || !other.hasSurroundAngle || other.behavior == null || other.Layer != Layer)
+                continue;
+            float delta = Mathf.DeltaAngle(other.surroundAngle, surroundAngle);
+            if (Mathf.Abs(delta) >= SpreadDegrees)
+                continue;
+            float away = delta != 0f ? Mathf.Sign(delta) : (GetInstanceID() < other.GetInstanceID() ? 1f : -1f);
+            surroundAngle += away * (SpreadDegrees - Mathf.Abs(delta)) * 2f * Time.deltaTime;
+        }
+        surroundAngle += (Mathf.PerlinNoise(age * 0.15f, wanderSeed) - 0.5f) * 30f * Time.deltaTime;
+
+        float ring = stopDistance * 0.85f + radius;
+        float a = surroundAngle * Mathf.Deg2Rad;
+        Vector3 goal = player.position + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * ring;
+        Vector3 toGoal = Flat(goal - transform.position);
+
+        advance = toGoal.magnitude > 0.3f;
+        Vector3 heading = toGoal.sqrMagnitude > 0.0001f ? toGoal.normalized : toPlayer;
+        float wobble = (Mathf.PerlinNoise(age * 0.6f, wanderSeed + 7f) - 0.5f) * 2f * WobbleDegrees * Mathf.Clamp01(centerDistance / 6f);
+        return Quaternion.Euler(0f, wobble, 0f) * heading;
+    }
 
     private void Move(Vector3 direction, float distance, bool advance)
     {
@@ -301,7 +356,7 @@ public class ModelEnemy : MonoBehaviour
     }
 
     // Megabonk-style crowding. Enemies side by side push apart. One that's heading for the player with
-    // another enemy blocking the way climbs up onto its head, rides along up there, and falls off
+    // another enemy blocking the way first tries to step around it, and if it stays stuck climbs up onto its head, rides along up there, and falls off
     // when it walks off the edge or the one underneath dies.
     private Vector3 Crowd(Vector3 position, Vector3 direction, bool advance)
     {
@@ -310,6 +365,7 @@ public class ModelEnemy : MonoBehaviour
         CrowdLayer layer = Layer;
         float support = 0f;    // height of the highest head it's standing on
         float climbTo = -1f;   // height of the head it's climbing onto, if any
+        bool blocked = false;  // something's in the way this frame
 
         if (layer != CrowdLayer.None)
         {
@@ -342,14 +398,23 @@ public class ModelEnemy : MonoBehaviour
                     if (advance && inMyWay && otherTop <= MaxStackHeight
                         && (!imInItsWay || GetInstanceID() < other.GetInstanceID()))
                     {
-                        climbTo = Mathf.Max(climbTo, otherTop);
-                        continue;
+                        blocked = true;
+                        if (climbing || blockedTimer >= ClimbPatience)
+                        {
+                            climbTo = Mathf.Max(climbTo, otherTop);
+                            continue;
+                        }
+                        // Not stuck for long yet: try to step around it first
+                        position += Vector3.Cross(Vector3.up, awayDir) * orbitDirection * Speed * Time.deltaTime;
                     }
                 }
 
                 position += awayDir * Mathf.Min(reach - gap, SeparateSpeed * Time.deltaTime);
             }
         }
+
+        blockedTimer = blocked ? blockedTimer + Time.deltaTime : Mathf.Max(0f, blockedTimer - 2f * Time.deltaTime);
+        climbing = climbTo > standHeight;
 
         if (climbTo > standHeight)
         {
