@@ -3,7 +3,7 @@ using UnityEngine;
 // A shot fired by a ModelEnemy: flies toward where the player was and hurts them if it gets close.
 public class EnemyProjectile : MonoBehaviour
 {
-    private const float Speed = 8f;
+    private const float Speed = 5f;
     private const float HitDistance = 0.7f;
     private const float Lifetime = 4f;
 
