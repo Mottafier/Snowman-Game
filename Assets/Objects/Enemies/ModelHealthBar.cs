@@ -2,15 +2,17 @@ using UnityEngine;
 
 // Floating health bar above an enemy spawned from the terminal. Always faces the camera,
 // shrinks from the right and shifts from green to red as the enemy loses health.
+// Its size follows the enemy's size (not its health): giants get a big bar, tiny critters a small one.
 public class ModelHealthBar : MonoBehaviour
 {
-    private const float BarThickness = 0.12f;
-    private const float Border = 0.03f;
-    private const float GapAboveModel = 0.35f;
+    private const float MinWidth = 0.3f;
+    private const float MaxWidth = 6f;
 
     private EnemyHealth target;
     private float heightAboveTarget;
     private float width;
+    private float thickness;
+    private float border;
     private Transform fill;
     private Material fillMaterial;
     private Camera cam;
@@ -19,8 +21,12 @@ public class ModelHealthBar : MonoBehaviour
     {
         var bar = new GameObject($"{target.name} health bar").AddComponent<ModelHealthBar>();
         bar.target = target;
-        bar.heightAboveTarget = modelHeight + GapAboveModel;
-        bar.width = Mathf.Clamp(modelWidth, 0.8f, 1.6f);
+        // Size from how big the enemy looks: mostly its width, but tall thin enemies count too
+        float size = Mathf.Max(modelWidth, modelHeight * 0.6f);
+        bar.width = Mathf.Clamp(size, MinWidth, MaxWidth);
+        bar.thickness = Mathf.Clamp(bar.width * 0.1f, 0.04f, 0.4f);
+        bar.border = bar.thickness * 0.25f;
+        bar.heightAboveTarget = modelHeight + Mathf.Clamp(bar.width * 0.25f, 0.15f, 1f);
         bar.Build();
         return bar;
     }
@@ -35,12 +41,12 @@ public class ModelHealthBar : MonoBehaviour
     private void Build()
     {
         Transform back = LowPolyBuilder.Part(transform, "Background", LowPolyBuilder.Box, Color.black,
-            Vector3.zero, new Vector3(width + Border * 2f, BarThickness + Border * 2f, 0.01f));
+            Vector3.zero, new Vector3(width + border * 2f, thickness + border * 2f, 0.01f));
         back.GetComponent<Renderer>().sharedMaterial = UnlitMaterial(new Color(0.1f, 0.1f, 0.1f));
 
         // Sits slightly toward the camera (the bar's -Z side) so it draws on top of the background
         fill = LowPolyBuilder.Part(transform, "Fill", LowPolyBuilder.Box, Color.green,
-            new Vector3(0f, 0f, -0.01f), new Vector3(width, BarThickness, 0.01f));
+            new Vector3(0f, 0f, -0.01f), new Vector3(width, thickness, 0.01f));
         fillMaterial = UnlitMaterial(Color.green);
         fill.GetComponent<Renderer>().sharedMaterial = fillMaterial;
     }
@@ -65,7 +71,7 @@ public class ModelHealthBar : MonoBehaviour
             return;
 
         float fraction = Mathf.Clamp01((float)target.hp / target.hpMax);
-        fill.localScale = new Vector3(width * fraction, BarThickness, 0.01f);
+        fill.localScale = new Vector3(width * fraction, thickness, 0.01f);
         fill.localPosition = new Vector3(-width * (1f - fraction) / 2f, 0f, -0.01f);
         fillMaterial.color = Color.Lerp(new Color(0.9f, 0.15f, 0.1f), new Color(0.2f, 0.85f, 0.25f), fraction);
     }
