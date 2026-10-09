@@ -1,7 +1,8 @@
 using UnityEngine;
 
 // A shot fired by a ModelEnemy: flies toward where the player's eyes were (or curves gently toward them if homing)
-// and hurts them if it gets close. Snowballs knock it out of the air, and snow walls stop it. The visible model is the "Visual" child, which spins according to the
+// and hurts them if it gets close. Snowballs knock it out of the air, and snow walls and the ground stop it.
+// However it ends, it breaks apart into a burst of chunks in its own colors. The visible model is the "Visual" child, which spins according to the
 // enemy's projectile design.
 public class EnemyProjectile : MonoBehaviour
 {
@@ -22,6 +23,7 @@ public class EnemyProjectile : MonoBehaviour
     private Transform visual;
     private Vector3 spinAxis;
     private float spinSpeed;
+    private Color[] colors; // the shot's own colors, for the burst when it breaks
 
     // yawOffset turns the shot left or right of the player (for spread attacks)
     public void Launch(PlayerHealth player, int damageAmount, string spin, float yawOffset, bool isHoming, bool slowsOnHit)
@@ -45,6 +47,7 @@ public class EnemyProjectile : MonoBehaviour
         body.useGravity = false;
 
         visual = transform.Find("Visual");
+        colors = ColorsOf(visual != null ? visual : transform);
         switch (spin)
         {
             case "spin": spinAxis = Vector3.up; spinSpeed = 720f; break;        // flat, like a frisbee or thrown card
@@ -85,15 +88,18 @@ public class EnemyProjectile : MonoBehaviour
         if (target != null && Vector3.Distance(transform.position, AimPointOf(target)) < HitDistance)
         {
             ModelEnemy.HitPlayer(target, damage, slows);
-            Destroy(gameObject);
+            Burst();
         }
         else if (age > (homing ? HomingLifetime : Lifetime))
         {
-            Destroy(gameObject);
+            Burst();
         }
     }
 
-    void OnTriggerEnter(Collider other)
+    void OnTriggerEnter(Collider other) => Touch(other);
+    void OnTriggerStay(Collider other) => Touch(other);
+
+    private void Touch(Collider other)
     {
         // Shot down by a snowball: both burst into snow
         Snowball snowball = other.GetComponentInParent<Snowball>();
@@ -106,15 +112,27 @@ public class EnemyProjectile : MonoBehaviour
             return;
         }
 
-        // Stopped by a snow wall
-        if (other.gameObject.layer == LayerMask.NameToLayer("WallLayer"))
+        // Stopped by a snow wall, or by the ground once it's on its way down
+        // (shots from short enemies start out brushing the ground while climbing toward the player's eyes)
+        int layer = other.gameObject.layer;
+        if (layer == LayerMask.NameToLayer("WallLayer")
+            || (layer == LayerMask.NameToLayer("Ground") && velocity.y < 0f))
             Burst();
     }
 
     private void Burst()
     {
-        SnowSpray.Emit(transform.position, 8, 0.6f);
+        SnowSpray.Burst(transform.position, colors, 14);
         Destroy(gameObject);
+    }
+
+    private static Color[] ColorsOf(Transform root)
+    {
+        var found = new System.Collections.Generic.List<Color>();
+        foreach (Renderer r in root.GetComponentsInChildren<Renderer>())
+            if (r.sharedMaterial != null && !found.Contains(r.sharedMaterial.color))
+                found.Add(r.sharedMaterial.color);
+        return found.ToArray();
     }
 
     // Aim at the camera: the player shrinks as they use snow, so a fixed height above their feet misses
