@@ -1,0 +1,184 @@
+"""Ask for a word or phrase, have Claude design a low poly model of it, and send it to the running game.
+
+The game side is Assets/Objects/Managers/TerminalModelSpawner.cs, which listens on 127.0.0.1:5055.
+Uses the Claude Code CLI (`claude`) signed in to your Claude plan, so there is no separate API bill.
+"""
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+PORT = 5055
+CLAUDE_TIMEOUT_SECONDS = 300
+
+SYSTEM_PROMPT = """\
+You design low poly 3D models for a cozy snowy game. Every model is built only from simple shapes.
+
+Shapes (each fits a 1x1x1 box centered on its position before scaling):
+- sphere: low poly ellipsoid
+- cube: box
+- cylinder: axis along local Y
+- cone: base at local y=-0.5, tip at local y=+0.5
+
+Coordinates are Unity's, in meters: Y is up, the model's front faces +Z, and +X is the model's right.
+Stand the model on y=0 and center it on x=0, z=0.
+- position: center of the shape
+- scale: size along the shape's local X, Y and Z in meters
+- rotation: Euler angles in degrees, applied Z first, then X, then Y.
+  For example rotation x=90 points a cone's tip (+Y) toward +Z, and z=90 points it toward -X.
+
+Guidelines:
+- Use realistic real-world sizes (a mug is about 0.1 m, a person 1.8 m, a car 4.5 m). The game rescales very large or tiny objects.
+- Capture the most recognizable silhouette and features, slightly exaggerated like a caricature so it reads at a glance.
+- Overlap shapes so there are no gaps or floating pieces, unless the object really has them.
+- Use between 5 and 60 parts. Flat, saturated colors with r, g, b from 0 to 1.
+- People and characters: make them recognizable through build, clothing, hair, colors and signature accessories.
+- Abstract words or actions: build the most iconic object or symbol associated with them.
+- name: a short display name for the model.
+"""
+
+VECTOR = {
+    "type": "object",
+    "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}},
+    "required": ["x", "y", "z"],
+    "additionalProperties": False,
+}
+
+MODEL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "parts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "shape": {"type": "string", "enum": ["sphere", "cube", "cylinder", "cone"]},
+                    "color": {
+                        "type": "object",
+                        "properties": {"r": {"type": "number"}, "g": {"type": "number"}, "b": {"type": "number"}},
+                        "required": ["r", "g", "b"],
+                        "additionalProperties": False,
+                    },
+                    "position": VECTOR,
+                    "rotation": VECTOR,
+                    "scale": VECTOR,
+                },
+                "required": ["shape", "color", "position", "rotation", "scale"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["name", "parts"],
+    "additionalProperties": False,
+}
+
+
+def game_is_running():
+    try:
+        with socket.create_connection(("127.0.0.1", PORT), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def send_to_game(spec):
+    with socket.create_connection(("127.0.0.1", PORT), timeout=5) as conn:
+        conn.sendall((json.dumps(spec) + "\n").encode("utf-8"))
+
+
+def design_model(claude, prompt):
+    """Returns the model spec dict, or None if Claude couldn't make one."""
+    # Drop API credentials so the CLI uses the Claude plan sign-in rather than per-use API billing
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+
+    command = [
+        claude, "-p", f"Design a low poly model of: {prompt}",
+        "--system-prompt", SYSTEM_PROMPT,
+        "--json-schema", json.dumps(MODEL_SCHEMA),
+        "--output-format", "json",
+        "--effort", "medium",
+        "--tools", "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+    ]
+    try:
+        # Run outside the project so no project settings or instructions get picked up
+        proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=env,
+                              cwd=tempfile.gettempdir(), timeout=CLAUDE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        print("  Claude took too long. Try again.")
+        return None
+
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        print(f"  Couldn't read Claude's reply: {(proc.stderr or proc.stdout).strip()[:300]}")
+        return None
+
+    if result.get("is_error"):
+        message = str(result.get("result", "unknown error"))
+        if "login" in message.lower():
+            print("  The claude command isn't signed in. Run `claude`, type /login, sign in with your Claude account, then try again.")
+        else:
+            print(f"  Claude returned an error: {message}")
+        return None
+
+    spec = result.get("structured_output")
+    if spec is None:
+        try:
+            spec = json.loads(result.get("result", ""))
+        except json.JSONDecodeError:
+            print("  Claude didn't return a model. Try again.")
+            return None
+    return spec
+
+
+def main():
+    claude = shutil.which("claude")
+    if claude is None:
+        print("Couldn't find the `claude` command. Install Claude Code: https://claude.com/claude-code")
+        return 1
+
+    print("Type a word or phrase and it will appear in front of you in the game.")
+    print("Press Enter on an empty line (or Ctrl+C) to quit.\n")
+
+    while True:
+        try:
+            prompt = input("Input word or phrase: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not prompt:
+            break
+
+        if not game_is_running():
+            print(f"  Couldn't reach the game on port {PORT}. Is it running in Play mode?\n")
+            continue
+
+        print(f"  Designing a low poly {prompt}...")
+        started = time.time()
+        spec = design_model(claude, prompt)
+        if spec is None:
+            print()
+            continue
+
+        try:
+            send_to_game(spec)
+        except OSError:
+            print("  The game stopped before the model could be sent.\n")
+            continue
+
+        print(f"  Spawned {spec['name']} ({len(spec['parts'])} parts, {time.time() - started:.0f}s)\n")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
