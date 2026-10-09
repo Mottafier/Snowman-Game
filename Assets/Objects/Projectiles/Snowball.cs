@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Thrown snowball projectile: damages enemies on impact and plays a hit effect/sound.
 public class Snowball : MonoBehaviour
 {
     private Vector3 previousVelocity;
