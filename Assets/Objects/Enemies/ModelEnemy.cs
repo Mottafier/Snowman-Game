@@ -17,7 +17,7 @@ public class ModelEnemy : MonoBehaviour
         public int health;
     }
 
-    private const float WakeUpDelay = 1f;
+    private const float WakeUpDelay = 2f;
     private const float HopHeight = 0.6f;
     private const float HoverHeight = 1.5f;
 
@@ -67,7 +67,8 @@ public class ModelEnemy : MonoBehaviour
         var s = spec ?? new BehaviorSpec();
         s.movement = s.movement ?? "walk";
         s.attack = s.attack ?? "melee";
-        s.speed = Mathf.Clamp(s.speed, 0.5f, 6f);
+        // The player only manages 1-3.5 m/s depending on how much snow they carry, so keep enemies slower
+        s.speed = Mathf.Clamp(s.speed, 0.3f, 2f);
         s.damage = Mathf.Clamp(s.damage, 1, 50);
         s.attackCooldown = Mathf.Clamp(s.attackCooldown, 0.4f, 6f);
         s.health = Mathf.Clamp(s.health, 25, 400);
@@ -190,7 +191,7 @@ public class ModelEnemy : MonoBehaviour
                 }
                 break;
             case ChargePhase.Dash:
-                position += dashDirection * behavior.speed * 3f * Time.deltaTime;
+                position += dashDirection * behavior.speed * 2f * Time.deltaTime;
                 if (chargeTimer <= 0f)
                 {
                     chargePhase = ChargePhase.Rest;

@@ -44,7 +44,8 @@ Every model comes alive as an enemy that chases and attacks the player, who figh
 (25 damage each; the player has 100 HP). Pick a behavior that suits what the thing is:
 - movement: walk (steady), hop (bouncing jumps), fly (hovers above the ground), charge (winds up, then dashes),
   zigzag (weaves side to side)
-- speed: meters per second, 0.5 (sluggish) to 6 (very fast); the player walks at about 3.5
+- speed: meters per second, 0.3 (crawling) to 2 (very fast). The player is slow (1 to 3.5 depending on how much
+  snow they carry), so most enemies should be 0.5 to 1.2 and only a rare few above 1.5
 - attack: melee (lunges and hits up close), ranged (throws shots from a distance), explode (runs up and blows up, once)
 - damage per hit, 1 to 50; attackRange in meters (melee 0.8-3, ranged 3-15, explode 1-4);
   attackCooldown in seconds between attacks (0.4-6); health 25 to 400
