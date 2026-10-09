@@ -26,7 +26,13 @@ public class PlayerSnow : MonoBehaviour
     [SerializeField] public float collectCombo = 0f;
     private float collectProgress = 0f;
 
+    // isGrounded can drop out for a frame (e.g. when the collect squash changes the capsule), so treat
+    // the player as grounded if they touched the ground very recently
+    private const float GroundedGraceSeconds = 0.25f;
+
     private CharacterController controller;
+    private bool collectHeld;
+    private float lastGroundedTime = float.NegativeInfinity;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -36,7 +42,7 @@ public class PlayerSnow : MonoBehaviour
 
     public void OnCollect(InputValue value)
     {
-        isCollecting = value.isPressed;
+        collectHeld = value.isPressed;
     }
     public void OnPlaceBase(InputValue value)
     {
@@ -101,9 +107,18 @@ public class PlayerSnow : MonoBehaviour
         snowBar.collectCombo = collectCombo;
 
         // Snow can only be scooped up while standing on the ground
-        bool grounded = controller == null || controller.isGrounded;
+        if (controller == null || controller.isGrounded)
+            lastGroundedTime = Time.time;
+        bool grounded = Time.time - lastGroundedTime < GroundedGraceSeconds;
 
-        if (isCollecting && grounded && SnowAmount < snowCapacity)
+        // Once full, the collect button has to be pressed again (same as when a tile runs out of snow)
+        if (SnowAmount >= snowCapacity)
+            collectHeld = false;
+
+        // In the air, collecting just pauses; it picks back up on landing if the button is still held
+        isCollecting = collectHeld && grounded;
+
+        if (isCollecting)
         {
             // Build combo while continuously collecting
             collectCombo += Time.deltaTime;
@@ -134,6 +149,7 @@ public class PlayerSnow : MonoBehaviour
                 {
                     // Current tile has no snow, so don't consume the progress.
                     isCollecting = false;
+                    collectHeld = false;
                     break;
                 }
             }
@@ -147,7 +163,6 @@ public class PlayerSnow : MonoBehaviour
             collectCombo = 0f;
             collectProgress = 0f;
 
-            isCollecting = false;
             StopCollectSound();
         }
 
