@@ -22,6 +22,7 @@ public class SimpleFirstPerson : MonoBehaviour
 
     public float moveSpeed = 3.5f;
     public float jumpHeight = 1.2f;
+    public float snowJumpHeight = 3f; // meters gained by an air jump that spends one snow
     public float gravity = -9.81f;
     public float lookSensitivity = 0.4f;
 
@@ -51,11 +52,35 @@ public class SimpleFirstPerson : MonoBehaviour
     public void OnLook(InputValue value) => lookInput = value.Get<Vector2>();
     public void OnJump(InputValue value)
     {
-        if (controller.isGrounded && value.isPressed) Jump();
+        if (!value.isPressed) return;
+
+        if (controller.isGrounded) Jump();
+        else if (playerSnow.SnowAmount >= 1) SnowJump();
     }
     public void Jump()
     {
         yVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
+    }
+
+    // Mid-air jump that spends one snow and launches the player snowJumpHeight meters up
+    public void SnowJump()
+    {
+        playerSnow.SpendSnow(1);
+
+        // Vertical movement is scaled by the current move speed too, so divide it back out to get a consistent height
+        yVelocity = Mathf.Sqrt(snowJumpHeight * -2f * gravity / CurrentMoveSpeed());
+    }
+
+    private float CurrentMoveSpeed()
+    {
+        var speed = moveSpeed;
+        if (playerSnow.isCollecting)
+        {
+            speed *= 0.3f;
+        }
+
+        speed *= Mathf.Lerp(0.3f, 1f, playerSnow.SnowAmount / 6f);
+        return speed;
     }
     void Update()
     {
@@ -73,13 +98,7 @@ public class SimpleFirstPerson : MonoBehaviour
         // Movement
         Vector3 move = transform.right * moveInput.x + transform.forward * moveInput.y;
 
-        var moveSpeedCurrent = moveSpeed;
-        if (playerSnow.isCollecting)
-        {
-            moveSpeedCurrent *= 0.3f;
-        }
-
-        moveSpeedCurrent *= Mathf.Lerp(0.3f, 1f, playerSnow.SnowAmount / 6f);
+        var moveSpeedCurrent = CurrentMoveSpeed();
 
         yVelocity += gravity * Time.deltaTime;
         if (controller.isGrounded && yVelocity < 0) yVelocity = -2f;

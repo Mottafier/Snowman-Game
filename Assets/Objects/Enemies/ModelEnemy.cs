@@ -20,13 +20,15 @@ public class ModelEnemy : MonoBehaviour
     private const float WakeUpDelay = 2f;
     private const float HopHeight = 0.6f;
     private const float HoverHeight = 1.5f;
+    private const float ProjectileSize = 0.45f;
 
     private BehaviorSpec behavior;
     private Transform player;
     private PlayerHealth playerHealth;
     private Transform body;
     private Vector3 bodyRestPosition;
-    private Color projectileColor = Color.white;
+    private GameObject projectileTemplate; // hidden copy that each shot is cloned from
+    private string projectileSpin;
 
     private float groundY;
     private float radius;
@@ -42,7 +44,7 @@ public class ModelEnemy : MonoBehaviour
     private float chargeTimer = 1.5f;
     private Vector3 dashDirection;
 
-    public void Configure(BehaviorSpec spec, Transform model, float footprintRadius, float modelHeight)
+    public void Configure(BehaviorSpec spec, ModelRecipe.ProjectileSpec projectile, Transform model, float footprintRadius, float modelHeight)
     {
         behavior = Sanitize(spec);
         body = model;
@@ -52,9 +54,8 @@ public class ModelEnemy : MonoBehaviour
         groundY = transform.position.y;
         cooldown = behavior.attackCooldown * 0.5f;
 
-        Renderer firstRenderer = model.GetComponentInChildren<Renderer>();
-        if (firstRenderer != null)
-            projectileColor = firstRenderer.sharedMaterial.color;
+        if (behavior.attack == "ranged")
+            BuildProjectileTemplate(projectile, model);
 
         var health = gameObject.AddComponent<EnemyHealth>();
         health.hpMax = behavior.health;
@@ -242,10 +243,52 @@ public class ModelEnemy : MonoBehaviour
 
     private void FireProjectile()
     {
-        var projectile = new GameObject($"{name} shot").transform;
-        projectile.position = transform.position + Vector3.up * (height * 0.6f);
-        LowPolyBuilder.Part(projectile, "Shape", LowPolyBuilder.Sphere, projectileColor, Vector3.zero, Vector3.one * 0.25f);
-        projectile.gameObject.AddComponent<EnemyProjectile>().Launch(playerHealth, behavior.damage);
+        if (projectileTemplate == null)
+            return;
+
+        Vector3 origin = transform.position + Vector3.up * (height * 0.6f);
+        GameObject shot = Instantiate(projectileTemplate, origin, Quaternion.identity);
+        shot.name = $"{name} shot";
+        shot.SetActive(true);
+        shot.AddComponent<EnemyProjectile>().Launch(playerHealth, behavior.damage, projectileSpin);
+    }
+
+    // Builds the enemy's own projectile from Claude's design (or a ball in its main color if there isn't one),
+    // centered and sized to ProjectileSize, with its front facing the direction of flight
+    private void BuildProjectileTemplate(ModelRecipe.ProjectileSpec spec, Transform enemyModel)
+    {
+        projectileTemplate = new GameObject($"{name} projectile");
+        var visual = new GameObject("Visual").transform;
+        visual.SetParent(projectileTemplate.transform, false);
+
+        Transform shape;
+        if (spec != null && spec.parts != null && spec.parts.Length > 0)
+        {
+            shape = ModelRecipe.Build(spec.parts);
+            projectileSpin = spec.spin;
+        }
+        else
+        {
+            shape = new GameObject("Model").transform;
+            Renderer firstRenderer = enemyModel.GetComponentInChildren<Renderer>();
+            Color color = firstRenderer != null ? firstRenderer.sharedMaterial.color : Color.white;
+            LowPolyBuilder.Part(shape, "Ball", LowPolyBuilder.Sphere, color, Vector3.zero, Vector3.one);
+            projectileSpin = "none";
+        }
+
+        Bounds bounds = ModelRecipe.MeasureBounds(shape);
+        float largest = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z, 0.001f);
+        shape.SetParent(visual, false);
+        shape.localPosition = -bounds.center;
+        visual.localScale = Vector3.one * (ProjectileSize / largest);
+
+        projectileTemplate.SetActive(false);
+    }
+
+    void OnDestroy()
+    {
+        if (projectileTemplate != null)
+            Destroy(projectileTemplate);
     }
 
     private IEnumerator Explode()

@@ -23,33 +23,6 @@ public class TerminalModelSpawner : MonoBehaviour
     private Thread listenThread;
     private readonly ConcurrentQueue<string> pending = new ConcurrentQueue<string>();
 
-    // JSON shape sent by Tools/spawn_model.py (fields are filled in by JsonUtility)
-#pragma warning disable 0649
-    [Serializable]
-    private class ModelSpec
-    {
-        public string name;
-        public PartSpec[] parts;
-        public ModelEnemy.BehaviorSpec behavior;
-    }
-
-    [Serializable]
-    private class PartSpec
-    {
-        public string shape;
-        public Rgb color;
-        public Vector3 position;
-        public Vector3 rotation;
-        public Vector3 scale;
-    }
-
-    [Serializable]
-    private class Rgb
-    {
-        public float r, g, b;
-    }
-#pragma warning restore 0649
-
     // Create the spawner automatically so it doesn't need to be added to the scene
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void CreateInstance()
@@ -125,7 +98,7 @@ public class TerminalModelSpawner : MonoBehaviour
         {
             try
             {
-                SpawnModel(JsonUtility.FromJson<ModelSpec>(json));
+                SpawnModel(JsonUtility.FromJson<ModelRecipe>(json));
             }
             catch (Exception e)
             {
@@ -134,7 +107,7 @@ public class TerminalModelSpawner : MonoBehaviour
         }
     }
 
-    private void SpawnModel(ModelSpec spec)
+    private void SpawnModel(ModelRecipe spec)
     {
         if (spec?.parts == null || spec.parts.Length == 0)
         {
@@ -150,8 +123,8 @@ public class TerminalModelSpawner : MonoBehaviour
         }
 
         // Build the model at the origin so its bounds are easy to measure
-        Transform model = BuildModel(spec);
-        Bounds bounds = MeasureBounds(model);
+        Transform model = ModelRecipe.Build(spec.parts);
+        Bounds bounds = ModelRecipe.MeasureBounds(model);
 
         // Shrink huge things and enlarge tiny things so they're easy to see
         float largest = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
@@ -185,50 +158,11 @@ public class TerminalModelSpawner : MonoBehaviour
             if (spec.behavior != null)
             {
                 float radius = Mathf.Max(bounds.size.x, bounds.size.z) * scale / 2f;
-                holder.gameObject.AddComponent<ModelEnemy>().Configure(spec.behavior, model, radius, bounds.size.y * scale);
+                holder.gameObject.AddComponent<ModelEnemy>().Configure(spec.behavior, spec.projectile, model, radius, bounds.size.y * scale);
             }
         }));
 
         Debug.Log($"TerminalModelSpawner: spawned \"{spec.name}\" ({spec.parts.Length} parts)");
-    }
-
-    private static Transform BuildModel(ModelSpec spec)
-    {
-        var root = new GameObject("Model").transform;
-        foreach (PartSpec part in spec.parts)
-        {
-            Mesh mesh = MeshFor(part.shape);
-            if (mesh == null)
-                continue;
-
-            var color = part.color != null ? new Color(part.color.r, part.color.g, part.color.b) : Color.white;
-            LowPolyBuilder.Part(root, part.shape, mesh, color, part.position, part.scale, part.rotation);
-        }
-        return root;
-    }
-
-    private static Mesh MeshFor(string shape)
-    {
-        switch (shape)
-        {
-            case "sphere": return LowPolyBuilder.Sphere;
-            case "cube": return LowPolyBuilder.Box;
-            case "cylinder": return LowPolyBuilder.Cylinder;
-            case "cone": return LowPolyBuilder.Cone;
-            default: return null;
-        }
-    }
-
-    private static Bounds MeasureBounds(Transform model)
-    {
-        Renderer[] renderers = model.GetComponentsInChildren<Renderer>();
-        if (renderers.Length == 0)
-            return new Bounds(Vector3.zero, Vector3.one);
-
-        Bounds bounds = renderers[0].bounds;
-        for (int i = 1; i < renderers.Length; i++)
-            bounds.Encapsulate(renderers[i].bounds);
-        return bounds;
     }
 
     // Find the ground under a point, ignoring anything we hit above the player's eyes

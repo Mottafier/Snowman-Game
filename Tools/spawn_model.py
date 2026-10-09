@@ -50,6 +50,13 @@ Every model comes alive as an enemy that chases and attacks the player, who figh
 - damage per hit, 1 to 50; attackRange in meters (melee 0.8-3, ranged 3-15, explode 1-4);
   attackCooldown in seconds between attacks (0.4-6); health 25 to 400
 Keep it fair and fun: fast or hard-hitting enemies should be fragile, and tough ones slow.
+
+projectile: what a ranged enemy throws or shoots, designed with the same shapes and coordinates but centered
+on the origin, with its front (the end that leads in flight) facing +Z. Keep it simple (1 to 12 parts) and make it
+fit the enemy: a deck of cards throws a playing card, a cactus fires a spine, a pirate ship fires a cannonball.
+The game resizes it, so use the real proportions. spin: none, spin (flat like a frisbee or thrown card),
+roll (around its flight direction like a bullet or football) or tumble (end over end like a thrown axe).
+For melee and explode enemies, give an empty parts list and spin none.
 """
 
 VECTOR = {
@@ -59,30 +66,29 @@ VECTOR = {
     "additionalProperties": False,
 }
 
+PART = {
+    "type": "object",
+    "properties": {
+        "shape": {"type": "string", "enum": ["sphere", "cube", "cylinder", "cone"]},
+        "color": {
+            "type": "object",
+            "properties": {"r": {"type": "number"}, "g": {"type": "number"}, "b": {"type": "number"}},
+            "required": ["r", "g", "b"],
+            "additionalProperties": False,
+        },
+        "position": VECTOR,
+        "rotation": VECTOR,
+        "scale": VECTOR,
+    },
+    "required": ["shape", "color", "position", "rotation", "scale"],
+    "additionalProperties": False,
+}
+
 MODEL_SCHEMA = {
     "type": "object",
     "properties": {
         "name": {"type": "string"},
-        "parts": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "shape": {"type": "string", "enum": ["sphere", "cube", "cylinder", "cone"]},
-                    "color": {
-                        "type": "object",
-                        "properties": {"r": {"type": "number"}, "g": {"type": "number"}, "b": {"type": "number"}},
-                        "required": ["r", "g", "b"],
-                        "additionalProperties": False,
-                    },
-                    "position": VECTOR,
-                    "rotation": VECTOR,
-                    "scale": VECTOR,
-                },
-                "required": ["shape", "color", "position", "rotation", "scale"],
-                "additionalProperties": False,
-            },
-        },
+        "parts": {"type": "array", "items": PART},
         "behavior": {
             "type": "object",
             "properties": {
@@ -97,8 +103,17 @@ MODEL_SCHEMA = {
             "required": ["movement", "speed", "attack", "damage", "attackRange", "attackCooldown", "health"],
             "additionalProperties": False,
         },
+        "projectile": {
+            "type": "object",
+            "properties": {
+                "parts": {"type": "array", "items": PART},
+                "spin": {"type": "string", "enum": ["none", "spin", "roll", "tumble"]},
+            },
+            "required": ["parts", "spin"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["name", "parts", "behavior"],
+    "required": ["name", "parts", "behavior", "projectile"],
     "additionalProperties": False,
 }
 

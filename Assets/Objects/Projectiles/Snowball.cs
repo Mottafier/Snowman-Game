@@ -21,7 +21,13 @@ public class Snowball : MonoBehaviour
             Instantiate(snowHitEffect,contact.point,Quaternion.LookRotation(hitDirection));
             AudioSource.PlayClipAtPoint(snowHitClip, contact.point);
         }
-       
+        else
+        {
+            // Hit the ground or scenery: burst into snow, spraying away from the surface
+            Destroy(gameObject);
+            Instantiate(snowHitEffect, contact.point, Quaternion.LookRotation(contact.normal));
+            AudioSource.PlayClipAtPoint(snowHitClip, contact.point, 0.5f);
+        }
     }
 
     void FixedUpdate()
