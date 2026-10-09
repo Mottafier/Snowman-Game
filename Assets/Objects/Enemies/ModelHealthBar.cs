@@ -15,13 +15,21 @@ public class ModelHealthBar : MonoBehaviour
     private Material fillMaterial;
     private Camera cam;
 
-    public static void Attach(EnemyHealth target, float modelHeight, float modelWidth)
+    public static ModelHealthBar Attach(EnemyHealth target, float modelHeight, float modelWidth)
     {
         var bar = new GameObject($"{target.name} health bar").AddComponent<ModelHealthBar>();
         bar.target = target;
         bar.heightAboveTarget = modelHeight + GapAboveModel;
         bar.width = Mathf.Clamp(modelWidth, 0.8f, 1.6f);
         bar.Build();
+        return bar;
+    }
+
+    // Hide the bar while its enemy can't be seen (e.g. burrowed underground)
+    public void SetVisible(bool visible)
+    {
+        foreach (Renderer r in GetComponentsInChildren<Renderer>())
+            r.enabled = visible;
     }
 
     private void Build()
