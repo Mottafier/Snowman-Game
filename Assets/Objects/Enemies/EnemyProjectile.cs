@@ -1,13 +1,14 @@
 using UnityEngine;
 
-// A shot fired by a ModelEnemy: flies toward where the player's eyes were (or keeps turning toward them if homing)
-// and hurts them if it gets close. The visible model is the "Visual" child, which spins according to the
+// A shot fired by a ModelEnemy: flies toward where the player's eyes were (or curves gently toward them if homing)
+// and hurts them if it gets close. Snowballs knock it out of the air, and snow walls stop it. The visible model is the "Visual" child, which spins according to the
 // enemy's projectile design.
 public class EnemyProjectile : MonoBehaviour
 {
     private const float Speed = 5f;
     private const float HomingSpeed = 3.5f;
-    private const float HomingTurnDegreesPerSecond = 120f;
+    private const float HomingTurnDegreesPerSecond = 35f; // a gentle curve you can still sidestep
+    private const float HitboxRadius = 0.3f;               // for snowballs and walls to touch
     private const float HitDistance = 0.7f;
     private const float Lifetime = 4f;
     private const float HomingLifetime = 6f;
@@ -35,6 +36,14 @@ public class EnemyProjectile : MonoBehaviour
         velocity = direction * (homing ? HomingSpeed : Speed);
         transform.rotation = Quaternion.LookRotation(velocity);
 
+        // A trigger so snowballs and snow walls can touch it (it never pushes anything around)
+        var hitbox = gameObject.AddComponent<SphereCollider>();
+        hitbox.isTrigger = true;
+        hitbox.radius = HitboxRadius;
+        var body = gameObject.AddComponent<Rigidbody>();
+        body.isKinematic = true;
+        body.useGravity = false;
+
         visual = transform.Find("Visual");
         switch (spin)
         {
@@ -49,9 +58,22 @@ public class EnemyProjectile : MonoBehaviour
     {
         if (homing && target != null)
         {
-            Vector3 desired = (AimPointOf(target) - transform.position).normalized * HomingSpeed;
-            velocity = Vector3.RotateTowards(velocity, desired, HomingTurnDegreesPerSecond * Mathf.Deg2Rad * Time.deltaTime, 0f);
-            transform.rotation = Quaternion.LookRotation(velocity);
+            // Only steer left and right: it keeps the up/down angle it was fired at
+            Vector3 flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
+            Vector3 toTarget = AimPointOf(target) - transform.position;
+            Vector3 flatToTarget = new Vector3(toTarget.x, 0f, toTarget.z);
+
+            if (Vector3.Dot(flatToTarget, flatVelocity) <= 0f)
+            {
+                homing = false; // it's gone past the player: fly straight from here on
+            }
+            else
+            {
+                flatVelocity = Vector3.RotateTowards(flatVelocity, flatToTarget.normalized * flatVelocity.magnitude,
+                    HomingTurnDegreesPerSecond * Mathf.Deg2Rad * Time.deltaTime, 0f);
+                velocity = new Vector3(flatVelocity.x, velocity.y, flatVelocity.z);
+                transform.rotation = Quaternion.LookRotation(velocity);
+            }
         }
 
         transform.position += velocity * Time.deltaTime;
@@ -69,6 +91,30 @@ public class EnemyProjectile : MonoBehaviour
         {
             Destroy(gameObject);
         }
+    }
+
+    void OnTriggerEnter(Collider other)
+    {
+        // Shot down by a snowball: both burst into snow
+        Snowball snowball = other.GetComponentInParent<Snowball>();
+        if (snowball != null)
+        {
+            Destroy(snowball.gameObject);
+            if (snowball.snowHitEffect != null)
+                Instantiate(snowball.snowHitEffect, transform.position, Quaternion.LookRotation(-velocity));
+            Burst();
+            return;
+        }
+
+        // Stopped by a snow wall
+        if (other.gameObject.layer == LayerMask.NameToLayer("WallLayer"))
+            Burst();
+    }
+
+    private void Burst()
+    {
+        SnowSpray.Emit(transform.position, 8, 0.6f);
+        Destroy(gameObject);
     }
 
     // Aim at the camera: the player shrinks as they use snow, so a fixed height above their feet misses
