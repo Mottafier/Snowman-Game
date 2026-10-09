@@ -26,10 +26,12 @@ public class PlayerSnow : MonoBehaviour
     [SerializeField] public float collectCombo = 0f;
     private float collectProgress = 0f;
 
+    private CharacterController controller;
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
-
+        controller = GetComponent<CharacterController>();
     }
 
     public void OnCollect(InputValue value)
@@ -98,7 +100,10 @@ public class PlayerSnow : MonoBehaviour
 
         snowBar.collectCombo = collectCombo;
 
-        if (isCollecting && SnowAmount < snowCapacity)
+        // Snow can only be scooped up while standing on the ground
+        bool grounded = controller == null || controller.isGrounded;
+
+        if (isCollecting && grounded && SnowAmount < snowCapacity)
         {
             // Build combo while continuously collecting
             collectCombo += Time.deltaTime;

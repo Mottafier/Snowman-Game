@@ -39,6 +39,11 @@ Guidelines:
 - People and characters: make them recognizable through build, clothing, hair, colors and signature accessories.
 - Abstract words or actions: build the most iconic object or symbol associated with them.
 - name: a short display name for the model.
+- count: how many copies of the model to spawn, read from the phrase. A single thing ("goblin", "a banana") is 1.
+  Groups scale with the wording: "a few" or "some" about 3, "a pack" or "a gang" 4 to 8, "a horde" or "a swarm"
+  8 to 15, "an army" 20 to 50. Never more than 50. Plain plurals ("goblins") are 2 to 4.
+  When count is above 10, keep the model simple (15 parts or fewer) and make each one weaker (lower health and damage)
+  so the group stays fair. Respect size words like "tiny" or "giant".
 
 Every model comes alive as an enemy that chases and attacks the player, who fights back with snowballs
 (25 damage each; the player has 100 HP). Pick a behavior that suits what the thing is:
@@ -88,6 +93,7 @@ MODEL_SCHEMA = {
     "type": "object",
     "properties": {
         "name": {"type": "string"},
+        "count": {"type": "integer"},
         "parts": {"type": "array", "items": PART},
         "behavior": {
             "type": "object",
@@ -113,7 +119,7 @@ MODEL_SCHEMA = {
             "additionalProperties": False,
         },
     },
-    "required": ["name", "parts", "behavior", "projectile"],
+    "required": ["name", "count", "parts", "behavior", "projectile"],
     "additionalProperties": False,
 }
 
@@ -216,9 +222,11 @@ def main():
             continue
 
         b = spec["behavior"]
-        print(f"  Spawned {spec['name']} ({len(spec['parts'])} parts, {time.time() - started:.0f}s)")
+        count = spec.get("count", 1)
+        what = spec["name"] if count == 1 else f"{count} x {spec['name']}"
+        print(f"  Spawned {what} ({len(spec['parts'])} parts each, {time.time() - started:.0f}s)")
         moves = {"fly": "flies"}.get(b["movement"], b["movement"] + "s")
-        print(f"  It {moves} at {b['speed']:g} m/s, {b['attack']} attack for {b['damage']} damage, {b['health']} HP\n")
+        print(f"  {'It' if count == 1 else 'Each'} {moves} at {b['speed']:g} m/s, {b['attack']} attack for {b['damage']} damage, {b['health']} HP\n")
 
     return 0
 
