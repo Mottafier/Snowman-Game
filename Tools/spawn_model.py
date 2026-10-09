@@ -1,17 +1,19 @@
 """Ask for a word or phrase, have Claude design a low poly model of it, and send it to the running game.
 
 The game side is Assets/Objects/Managers/TerminalModelSpawner.cs, which listens on 127.0.0.1:5055.
-Needs the `anthropic` package (pip install -r Tools/requirements.txt) and an ANTHROPIC_API_KEY.
+Uses the Claude Code CLI (`claude`) signed in to your Claude plan, so there is no separate API bill.
 """
 import json
+import os
+import shutil
 import socket
+import subprocess
 import sys
+import tempfile
 import time
 
-import anthropic
-
 PORT = 5055
-MODEL = "claude-opus-5-5"
+CLAUDE_TIMEOUT_SECONDS = 300
 
 SYSTEM_PROMPT = """\
 You design low poly 3D models for a cozy snowy game. Every model is built only from simple shapes.
@@ -89,41 +91,59 @@ def send_to_game(spec):
         conn.sendall((json.dumps(spec) + "\n").encode("utf-8"))
 
 
-def design_model(client, prompt):
+def design_model(claude, prompt):
     """Returns the model spec dict, or None if Claude couldn't make one."""
-    response = client.beta.messages.create(
-        model=MODEL,
-        max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        output_config={
-            "effort": "medium",
-            "format": {"type": "json_schema", "schema": MODEL_SCHEMA},
-        },
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"Design a low poly model of: {prompt}"}],
-    )
+    # Drop API credentials so the CLI uses the Claude plan sign-in rather than per-use API billing
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
 
-    if response.stop_reason == "refusal":
-        print("  Claude declined to make that one. Try another word.")
-        return None
-    if response.stop_reason == "max_tokens":
-        print("  The design got too long and was cut off. Try again or pick something simpler.")
+    command = [
+        claude, "-p", f"Design a low poly model of: {prompt}",
+        "--system-prompt", SYSTEM_PROMPT,
+        "--json-schema", json.dumps(MODEL_SCHEMA),
+        "--output-format", "json",
+        "--effort", "medium",
+        "--tools", "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+    ]
+    try:
+        # Run outside the project so no project settings or instructions get picked up
+        proc = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=env,
+                              cwd=tempfile.gettempdir(), timeout=CLAUDE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        print("  Claude took too long. Try again.")
         return None
 
-    text = next((block.text for block in response.content if block.type == "text"), None)
-    if text is None:
-        print("  Claude didn't return a model. Try again.")
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        print(f"  Couldn't read Claude's reply: {(proc.stderr or proc.stdout).strip()[:300]}")
         return None
-    return json.loads(text)
+
+    if result.get("is_error"):
+        message = str(result.get("result", "unknown error"))
+        if "login" in message.lower():
+            print("  The claude command isn't signed in. Run `claude`, type /login, sign in with your Claude account, then try again.")
+        else:
+            print(f"  Claude returned an error: {message}")
+        return None
+
+    spec = result.get("structured_output")
+    if spec is None:
+        try:
+            spec = json.loads(result.get("result", ""))
+        except json.JSONDecodeError:
+            print("  Claude didn't return a model. Try again.")
+            return None
+    return spec
 
 
 def main():
-    try:
-        client = anthropic.Anthropic()
-    except anthropic.AnthropicError as e:
-        print(f"Couldn't set up the Claude client: {e}")
-        print("Set your API key first, e.g.:  setx ANTHROPIC_API_KEY \"sk-ant-...\"  (then open a new terminal)")
+    claude = shutil.which("claude")
+    if claude is None:
+        print("Couldn't find the `claude` command. Install Claude Code: https://claude.com/claude-code")
         return 1
 
     print("Type a word or phrase and it will appear in front of you in the game.")
@@ -144,21 +164,7 @@ def main():
 
         print(f"  Designing a low poly {prompt}...")
         started = time.time()
-        try:
-            spec = design_model(client, prompt)
-        except anthropic.AuthenticationError:
-            print("  Your API key was rejected. Check ANTHROPIC_API_KEY.\n")
-            continue
-        except anthropic.RateLimitError:
-            print("  Hit the API rate limit. Wait a moment and try again.\n")
-            continue
-        except anthropic.APIStatusError as e:
-            print(f"  The API returned an error ({e.status_code}): {e.message}\n")
-            continue
-        except anthropic.APIConnectionError:
-            print("  Couldn't connect to the Claude API. Check your internet connection.\n")
-            continue
-
+        spec = design_model(claude, prompt)
         if spec is None:
             print()
             continue
