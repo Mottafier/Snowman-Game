@@ -30,6 +30,7 @@ public class TerminalModelSpawner : MonoBehaviour
     {
         public string name;
         public PartSpec[] parts;
+        public ModelEnemy.BehaviorSpec behavior;
     }
 
     [Serializable]
@@ -173,7 +174,20 @@ public class TerminalModelSpawner : MonoBehaviour
         spot.y = GroundHeight(spot, cam.transform.position.y);
 
         holder.SetPositionAndRotation(spot, Quaternion.LookRotation(-forward, Vector3.up));
-        StartCoroutine(PopIn(holder, scale));
+
+        // One box around the whole model so snowballs can hit it
+        var box = holder.gameObject.AddComponent<BoxCollider>();
+        box.center = new Vector3(0f, bounds.size.y / 2f, 0f);
+        box.size = bounds.size;
+
+        StartCoroutine(PopIn(holder, scale, () =>
+        {
+            if (spec.behavior != null)
+            {
+                float radius = Mathf.Max(bounds.size.x, bounds.size.z) * scale / 2f;
+                holder.gameObject.AddComponent<ModelEnemy>().Configure(spec.behavior, model, radius, bounds.size.y * scale);
+            }
+        }));
 
         Debug.Log($"TerminalModelSpawner: spawned \"{spec.name}\" ({spec.parts.Length} parts)");
     }
@@ -226,7 +240,8 @@ public class TerminalModelSpawner : MonoBehaviour
         return 0f;
     }
 
-    private IEnumerator PopIn(Transform holder, float targetScale)
+    // onDone runs once the model has reached full size (EnemyHealth remembers the scale it starts at)
+    private IEnumerator PopIn(Transform holder, float targetScale, Action onDone)
     {
         for (float t = 0f; t < popInSeconds; t += Time.deltaTime)
         {
@@ -239,7 +254,9 @@ public class TerminalModelSpawner : MonoBehaviour
             holder.localScale = Vector3.one * (targetScale * s);
             yield return null;
         }
-        if (holder != null)
-            holder.localScale = Vector3.one * targetScale;
+        if (holder == null)
+            yield break;
+        holder.localScale = Vector3.one * targetScale;
+        onDone();
     }
 }
