@@ -293,7 +293,10 @@ public class WorldManager : MonoBehaviour
     private void PlantTrees()
     {
         if (treePrefab == null)
+        {
+            Debug.LogWarning("WorldManager: no Tree Prefab set, so the trail has no trees");
             return;
+        }
 
         var spots = new List<Vector2>();
 
