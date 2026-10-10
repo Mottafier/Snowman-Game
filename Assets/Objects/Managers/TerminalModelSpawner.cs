@@ -214,14 +214,14 @@ public class TerminalModelSpawner : MonoBehaviour
         Destroy(prototype.gameObject);
     }
 
-    // Find the ground under a point, ignoring spawned enemies and anything above the player's eyes
+    // Find the ground under a point, ignoring spawned enemies, trees and anything above the player's eyes
     private float GroundHeight(Vector3 point, float eyeHeight)
     {
         var from = new Vector3(point.x, eyeHeight, point.z);
         float ground = float.NegativeInfinity;
         foreach (RaycastHit hit in Physics.RaycastAll(from, Vector3.down, 50f, ~0, QueryTriggerInteraction.Ignore))
         {
-            if (!spawned.Contains(hit.collider.gameObject))
+            if (!spawned.Contains(hit.collider.gameObject) && hit.collider.GetComponentInParent<TrailTree>() == null)
                 ground = Mathf.Max(ground, hit.point.y);
         }
         return float.IsNegativeInfinity(ground) ? 0f : ground;

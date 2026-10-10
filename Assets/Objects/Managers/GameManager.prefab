@@ -72,5 +72,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   snowTilePrefab: {fileID: 861765670214346710, guid: cf79cf2a9fc8a44499a2232079ecc24a, type: 3}
-  worldWidth: 100
-  worldHeight: 100
+  treePrefab: {fileID: 63423178062454011, guid: 951a6913a4cee9f4cb4a199bc5eff85f, type: 3}
+  groundMaterial: {fileID: 2100000, guid: dfb8f0cc9bb5752449e61ab97bae2a01, type: 2}
+  seed: 7
