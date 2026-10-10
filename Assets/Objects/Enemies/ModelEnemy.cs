@@ -223,6 +223,9 @@ public class ModelEnemy : MonoBehaviour
         if (behavior.special == "enrages" && !enraged && health.hp > 0 && health.hp <= health.hpMax / 2)
             Enrage();
 
+        // Walk up and down the hill on the trail
+        groundY = WorldManager.FollowGround(groundY, transform.position);
+
         if (busy)
         {
             // Still get shoved and fall while attacking or teleporting
@@ -394,8 +397,54 @@ public class ModelEnemy : MonoBehaviour
         }
 
         position = Crowd(position, direction, advance);
+        position = AvoidTrees(position);
         position.y = groundY + standHeight + lift;
         transform.position = position;
+    }
+
+    // ---------- Trees ----------
+
+    private const float BigEnemyHeight = 2.5f; // this tall or taller and it smashes trees instead of walking around them
+    private bool IsBig => height >= BigEnemyHeight;
+    private bool smashingTree;
+
+    // Small enemies slide around tree trunks; big ones stop and swipe any tree in their way out of it
+    private Vector3 AvoidTrees(Vector3 position)
+    {
+        if (Layer == CrowdLayer.None || standHeight > 0.5f)
+            return position; // underground, or riding up on someone's head
+
+        if (IsBig && !smashingTree)
+        {
+            TrailTree tree = TrailTree.Touching(position, radius + 0.3f);
+            if (tree != null)
+                StartCoroutine(SmashTree(tree));
+        }
+        return TrailTree.PushOut(position, radius);
+    }
+
+    private IEnumerator SmashTree(TrailTree tree)
+    {
+        smashingTree = true;
+        busy = true;
+        Vector3 aim = Flat(tree.transform.position - transform.position);
+        float reach = aim.magnitude + 1f;
+        aim = aim.sqrMagnitude > 0.0001f ? aim.normalized : transform.forward;
+
+        const float windUp = 0.3f, swing = 0.12f;
+        MeleeSlash slash = MeleeSlash.Show(new Vector3(transform.position.x, groundY + 0.05f, transform.position.z), aim, reach, windUp, BodyHeight());
+        for (float t = 0f; t < windUp; t += Time.deltaTime)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(aim), 10f * Time.deltaTime);
+            yield return null;
+        }
+        slash.Strike(swing);
+        yield return new WaitForSeconds(swing);
+
+        TrailTree.SmashInArc(transform.position, aim, reach, MeleeSlash.HalfArc);
+        busy = false;
+        yield return new WaitForSeconds(0.3f);
+        smashingTree = false;
     }
 
     // Megabonk-style crowding. Enemies side by side push apart. One that's heading for the player with
@@ -813,6 +862,9 @@ public class ModelEnemy : MonoBehaviour
     // Only connects if the player is still inside the slash zone, so walking out of it dodges the hit
     private void LungeHit(Vector3 direction)
     {
+        if (IsBig)
+            TrailTree.SmashInArc(transform.position, direction, radius + behavior.attackRange + MeleeLungeMeters, MeleeSlash.HalfArc);
+
         Vector3 toPlayer = player.position - transform.position;
         toPlayer.y = 0f;
         if (toPlayer.magnitude - radius <= behavior.attackRange + MeleeLungeMeters && MeleeSlash.InArc(direction, toPlayer))
@@ -842,6 +894,8 @@ public class ModelEnemy : MonoBehaviour
         body.localPosition = bodyRestPosition;
 
         EnemyPulse.Spawn(new Vector3(transform.position.x, groundY + 0.05f, transform.position.z), Color.white, behavior.attackRange + radius);
+        if (IsBig)
+            TrailTree.SmashAround(transform.position, behavior.attackRange + radius);
 
         Vector3 toPlayer = player.position - transform.position;
         toPlayer.y = 0f;
@@ -865,6 +919,8 @@ public class ModelEnemy : MonoBehaviour
         toPlayer.y = 0f;
         if (toPlayer.magnitude - radius <= behavior.attackRange + 0.5f)
             HitPlayer(playerHealth, behavior.damage, Slows);
+        if (IsBig)
+            TrailTree.SmashAround(transform.position, behavior.attackRange + radius + 0.5f);
         Destroy(gameObject);
     }
 

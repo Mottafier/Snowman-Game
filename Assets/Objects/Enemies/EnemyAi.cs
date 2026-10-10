@@ -18,6 +18,9 @@ public class EnemyAi : MonoBehaviour
     [SerializeField] private LayerMask wallLayer;
     [SerializeField] private EnemyAttack myAttack;
 
+    private bool IsBig => transform.lossyScale.y >= 2f;
+    private float TreeRadius => 0.3f * transform.lossyScale.x;
+
     void Awake()
     {
     }
@@ -66,6 +69,17 @@ public class EnemyAi : MonoBehaviour
 
         transform.position += direction * Time.deltaTime * sped; // Move towards player at speed 2
 
+        // Stay on the ground (it rises up the hill at the end of the trail) and out of tree trunks.
+        // Big ones knock trees out of their way instead.
+        if (IsBig && TrailTree.Touching(transform.position, TreeRadius + 0.2f) != null)
+        {
+            StartCoroutine(TelegraphThenAttack());
+            return;
+        }
+        Vector3 position = TrailTree.PushOut(transform.position, TreeRadius);
+        position.y = WorldManager.FollowGround(position.y, position);
+        transform.position = position;
+
         //CheckEnemyCollisions();
 
         if(Vector3.Distance(transform.position,target) < 0.6f)
@@ -89,6 +103,8 @@ public class EnemyAi : MonoBehaviour
         sped = 0f;
         yield return AttackTelegraph.Play(transform, transform);
         Instantiate(myAttack, transform.position, Quaternion.identity);
+        if (IsBig)
+            TrailTree.SmashAround(transform.position, TreeRadius + 1.5f);
         attacking = false;
     }
 
